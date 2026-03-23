@@ -140,6 +140,70 @@ export const optimizePrompt = async (productName: string, config: ServiceConfig)
   return response.text?.trim() || '';
 };
 
+export interface BedroomScene {
+  name: string;
+  name_cn: string;
+  description: string;
+  description_cn: string;
+  promptSuffix: string;
+}
+
+export const getBedroomSceneSuggestions = async (material: string, config: ServiceConfig): Promise<BedroomScene[]> => {
+  const ai = getAiClient();
+  const prompt = `Based on the product material "${material}", suggest 4 suitable bedroom scenes for product photography. 
+  Include both popular/classic and niche/creative bedroom styles from around the world.
+  For each scene, provide:
+  1. A short name in English.
+  2. A short name in Chinese.
+  3. A brief description in English.
+  4. A brief description in Chinese.
+  5. A prompt suffix for an AI image generator (in English).
+
+  Return the result as a JSON array of objects.
+  Example:
+  [
+    {
+      "name": "Scandinavian Minimalist",
+      "name_cn": "北欧极简风",
+      "description": "Clean lines, light wood, and neutral tones.",
+      "description_cn": "线条简洁，浅色木材，中性色调。",
+      "promptSuffix": "in a bright Scandinavian bedroom with light oak furniture and white linen bedding"
+    }
+  ]`;
+
+  const response = await ai.models.generateContent({
+    model: config.textModel,
+    contents: prompt,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            name: { type: Type.STRING },
+            name_cn: { type: Type.STRING },
+            description: { type: Type.STRING },
+            description_cn: { type: Type.STRING },
+            promptSuffix: { type: Type.STRING }
+          },
+          required: ["name", "name_cn", "description", "description_cn", "promptSuffix"]
+        }
+      }
+    }
+  });
+
+  const resultText = response.text?.trim();
+  if (!resultText) return [];
+
+  try {
+    return JSON.parse(resultText) as BedroomScene[];
+  } catch (e) {
+    console.error("Failed to parse bedroom scenes JSON:", e, resultText);
+    return [];
+  }
+};
+
 export const generateImage = async (
   productName: string,
   promptSuffix: string,

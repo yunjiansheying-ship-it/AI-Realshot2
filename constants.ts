@@ -43,3 +43,37 @@ export const dynamicAngleSlots: Angle[] = [
   { id: 12, name: 'AI 智能视点 A', type: 'Smart Analysis', promptSuffix: 'analyzing...', description_cn: 'AI 正在探索独特视角...', isDynamic: true },
   { id: 13, name: 'AI 智能视点 B', type: 'Smart Analysis', promptSuffix: 'analyzing...', description_cn: 'AI 正在探索独特视角...', isDynamic: true },
 ];
+
+export interface StyleTemplate {
+  name: string;
+  name_cn: string;
+  promptSuffix: string;
+}
+
+export const bedroomStyleTemplates: StyleTemplate[] = [
+  { name: 'Modern Minimalist', name_cn: '现代简约风', promptSuffix: 'in a sleek modern minimalist bedroom, clean lines, neutral color palette, high-end designer furniture, soft indirect lighting' },
+  { name: 'Scandinavian', name_cn: '北欧风', promptSuffix: 'in a bright Scandinavian bedroom, light oak wood textures, white linen bedding, cozy hygge atmosphere, natural daylight' },
+  { name: 'Natural Wood', name_cn: '原木风', promptSuffix: 'in a warm natural wood bedroom, Japanese zen aesthetic, light timber surfaces, minimalist organic decor, soft warm lighting' },
+  { name: 'Mid-Century Modern', name_cn: '中古风', promptSuffix: 'in a stylish mid-century modern bedroom, teak wood furniture, vintage 1950s aesthetic, geometric patterns, warm amber tones' },
+  { name: 'French Romantic', name_cn: '法式浪漫风', promptSuffix: 'in a luxurious French romantic bedroom, ornate moldings, cream and gold accents, elegant chandelier, soft velvet textures' },
+  { name: 'American Vintage', name_cn: '美式复古风', promptSuffix: 'in a classic American vintage bedroom, dark mahogany furniture, traditional patterns, cozy heritage atmosphere, warm lamp light' },
+  { name: 'Creamy Style', name_cn: '奶油风', promptSuffix: 'in a soft creamy style bedroom, monochromatic beige and off-white tones, rounded furniture edges, plush textures, gentle diffused light' },
+  { name: 'Bohemian', name_cn: '波西米亚风', promptSuffix: 'in a vibrant Bohemian bedroom, eclectic patterns, macrame wall hangings, indoor plants, warm earthy tones, relaxed artistic vibe' },
+  { name: 'Nanyang', name_cn: '南洋风', promptSuffix: 'in a tropical Nanyang style bedroom, rattan furniture, dark wood shutters, exotic plants, colonial Southeast Asian aesthetic' },
+  { name: 'Industrial', name_cn: '工业风', promptSuffix: 'in a raw industrial bedroom, exposed brick walls, metal accents, concrete textures, large factory windows, edgy urban vibe' },
+  { name: 'Cyberpunk Gaming', name_cn: '赛博电竞风', promptSuffix: 'in a high-tech cyberpunk gaming bedroom, neon RGB lighting, futuristic hardware, dark metallic surfaces, synthwave aesthetic' },
+  { name: 'Light Luxury', name_cn: '轻奢风', promptSuffix: 'in a sophisticated light luxury bedroom, marble accents, brass details, high-gloss surfaces, premium modern aesthetic' },
+  { name: 'Quiet Luxury', name_cn: '静奢风', promptSuffix: 'in an understated quiet luxury bedroom, high-quality natural materials, muted sophisticated colors, timeless minimalist design, expensive textures' },
+  { name: 'Biophilic', name_cn: '生机主义风', promptSuffix: 'in a lush biophilic bedroom, abundant indoor greenery, natural stone elements, large windows with forest view, organic vitality' },
+  { name: 'Wabi-sabi', name_cn: '侘寂风', promptSuffix: 'in a serene wabi-sabi bedroom, imperfect textures, weathered wood, clay walls, minimalist rustic aesthetic, peaceful solitude' },
+  { name: 'Moroccan', name_cn: '摩洛哥风', promptSuffix: 'in an exotic Moroccan bedroom, intricate tile patterns, colorful lanterns, arched doorways, rich textile layers, warm desert tones' },
+  { name: 'Mediterranean', name_cn: '地中海风', promptSuffix: 'in a breezy Mediterranean bedroom, whitewashed walls, blue accents, terracotta tiles, coastal sunlight, relaxed seaside vibe' },
+  { name: 'Bauhaus', name_cn: '包豪斯风', promptSuffix: 'in a functional Bauhaus bedroom, primary colors, tubular steel furniture, geometric clarity, modernist design principles' },
+  { name: 'Minimalism', name_cn: '极简主义风', promptSuffix: 'in an ultra-minimalist bedroom, extreme simplicity, hidden storage, monochrome palette, pure architectural space' },
+  { name: 'Memphis', name_cn: '孟菲斯风', promptSuffix: 'in a playful Memphis style bedroom, bold geometric shapes, pop colors, whimsical patterns, 1980s post-modern aesthetic' },
+  { name: 'Dark Aesthetic', name_cn: '暗黑美学风', promptSuffix: 'in a moody dark aesthetic bedroom, charcoal walls, dramatic shadows, gothic elegance, velvet and leather textures' },
+  { name: 'Cottagecore', name_cn: '考利奇风', promptSuffix: 'in a charming cottagecore bedroom, floral prints, vintage lace, rustic wooden beams, cozy countryside nostalgia' },
+  { name: 'Minimalist Mid-Century', name_cn: '极简中古风', promptSuffix: 'in a refined minimalist mid-century bedroom, clean vintage lines, sparse high-end decor, warm wood accents' },
+  { name: 'Tactilism', name_cn: '触感主义风', promptSuffix: 'in a texture-rich tactilism bedroom, layered fabrics, varied surface materials, sensory-focused design, soft tactile comfort' },
+  { name: 'Digital Zen', name_cn: '数字禅风', promptSuffix: 'in a futuristic digital zen bedroom, clean white surfaces, integrated smart lighting, ethereal atmosphere, technological serenity' },
+];

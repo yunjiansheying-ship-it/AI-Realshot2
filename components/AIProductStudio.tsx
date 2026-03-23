@@ -7,7 +7,7 @@ import {
   Square, Copyright, Play
 } from 'lucide-react';
 import { GeneratedResult, Angle, SavedProject } from '../types';
-import { staticAngles, dynamicAngleSlots } from '../constants';
+import { staticAngles, dynamicAngleSlots, bedroomStyleTemplates, StyleTemplate } from '../constants';
 import { 
   analyzeImageAndSuggestDescription,
   optimizePrompt,
@@ -16,6 +16,8 @@ import {
   getCreativeConcept,
   translatePromptToEnglish,
   getPromptFromImage,
+  getBedroomSceneSuggestions,
+  BedroomScene
 } from '../services/geminiService';
 import GenerationLoader from './GenerationLoader';
 
@@ -45,6 +47,9 @@ interface Props {
 const AIProductStudio = ({ onRequireKey }: Props = {}) => {
   const [mainImage, setMainImage] = useState<string | null>(null);
   const [productName, setProductName] = useState('');
+  const [productMaterial, setProductMaterial] = useState('');
+  const [bedroomScenes, setBedroomScenes] = useState<BedroomScene[]>([]);
+  const [isAnalyzingMaterial, setIsAnalyzingMaterial] = useState(false);
   const [lightingSuggestion, setLightingSuggestion] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedResults, setGeneratedResults] = useState<GeneratedResult[]>([]);
@@ -138,6 +143,7 @@ const AIProductStudio = ({ onRequireKey }: Props = {}) => {
       name: productName || `未命名项目 ${new Date().toLocaleDateString()}`,
       mainImage,
       productName,
+      productMaterial,
       lightingSuggestion,
       generatedResults,
       customPrompt
@@ -160,6 +166,7 @@ const AIProductStudio = ({ onRequireKey }: Props = {}) => {
     if (window.confirm('加载项目将覆盖当前工作区的所有内容。确定继续吗？')) {
       setMainImage(project.mainImage);
       setProductName(project.productName);
+      setProductMaterial(project.productMaterial || '');
       setLightingSuggestion(project.lightingSuggestion);
       setGeneratedResults(project.generatedResults);
       setCustomPrompt(project.customPrompt || '');
@@ -225,6 +232,8 @@ const AIProductStudio = ({ onRequireKey }: Props = {}) => {
         setMainImage(reader.result as string);
         setGeneratedResults([]);
         setProductName('');
+        setProductMaterial('');
+        setBedroomScenes([]);
         setCustomPrompt('');
         setLightingSuggestion('');
       };
@@ -310,9 +319,33 @@ const AIProductStudio = ({ onRequireKey }: Props = {}) => {
     setMainImage(null);
     setGeneratedResults([]);
     setProductName('');
+    setProductMaterial('');
+    setBedroomScenes([]);
     setLightingSuggestion('');
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
+    }
+  };
+
+  const handleAnalyzeMaterial = async () => {
+    if (!productMaterial) return;
+    setIsAnalyzingMaterial(true);
+    try {
+      const scenes = await getBedroomSceneSuggestions(productMaterial, getServiceConfig());
+      setBedroomScenes(scenes);
+    } catch (error) {
+      console.error("Material Analysis Error:", error);
+    } finally {
+      setIsAnalyzingMaterial(false);
+    }
+  };
+
+  const handleSelectScene = (scene: BedroomScene | StyleTemplate) => {
+    setCustomPrompt(scene.promptSuffix);
+    // Scroll to creative mode
+    const creativeModeElement = document.getElementById('creative-mode-section');
+    if (creativeModeElement) {
+        creativeModeElement.scrollIntoView({ behavior: 'smooth' });
     }
   };
 
@@ -1095,6 +1128,53 @@ const AIProductStudio = ({ onRequireKey }: Props = {}) => {
                   </div>
                   <textarea rows={2} value={productName} onChange={(e) => setProductName(e.target.value)} placeholder="核心描述，例如：Nike Air Max 红色运动鞋..." className="w-full px-4 py-2.5 bg-slate-950/50 border border-slate-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all text-sm resize-none text-slate-200 placeholder-slate-600" />
               </div>
+
+              {/* Material Analysis Section */}
+              <div className="mt-4 relative z-10">
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center">
+                    <Palette className="w-3 h-3 mr-1 text-indigo-400" />
+                    主体材质 (Material)
+                  </label>
+                  <button 
+                    onClick={handleAnalyzeMaterial} 
+                    disabled={!productMaterial || isAnalyzingMaterial} 
+                    className="text-[10px] text-indigo-300 hover:text-indigo-200 font-bold flex items-center bg-indigo-950/30 border border-indigo-500/30 px-2 py-1 rounded-md transition-colors disabled:opacity-50"
+                  >
+                    {isAnalyzingMaterial ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <BrainCircuit className="w-3 h-3 mr-1" />}
+                    分析场景
+                  </button>
+                </div>
+                <input 
+                  type="text" 
+                  value={productMaterial} 
+                  onChange={(e) => setProductMaterial(e.target.value)} 
+                  placeholder="例如：纯棉、真丝、实木、金属..." 
+                  className="w-full px-4 py-2 bg-slate-950/50 border border-slate-700 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm text-slate-200 placeholder-slate-600" 
+                />
+              </div>
+
+              {bedroomScenes.length > 0 && (
+                <div className="mt-4 space-y-2 animate-in fade-in slide-in-from-top-2 duration-300">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">推荐卧室场景 (Recommended Scenes)</label>
+                  <div className="grid grid-cols-1 gap-2">
+                    {bedroomScenes.map((scene, idx) => (
+                      <button 
+                        key={idx}
+                        onClick={() => handleSelectScene(scene)}
+                        className="text-left p-3 bg-slate-800/40 hover:bg-indigo-900/20 border border-slate-700 hover:border-indigo-500/50 rounded-xl transition-all group"
+                      >
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="text-xs font-bold text-indigo-300 group-hover:text-indigo-200">{scene.name_cn}</span>
+                          <span className="text-[10px] text-slate-500 font-mono">{scene.name}</span>
+                        </div>
+                        <p className="text-[10px] text-slate-400 line-clamp-1">{scene.description_cn}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {lightingSuggestion && (
                   <div className="mt-4 p-3 bg-indigo-950/30 border border-indigo-500/20 rounded-lg">
                       <div className="flex items-start">
@@ -1110,8 +1190,33 @@ const AIProductStudio = ({ onRequireKey }: Props = {}) => {
               )}
             </div>
 
+            {/* Bedroom Style Templates Card */}
+            <div className="bg-slate-900/40 backdrop-blur-md rounded-2xl border border-white/5 p-6 shadow-xl relative overflow-hidden">
+                <div className="absolute inset-0 bg-gradient-to-b from-purple-500/5 to-transparent pointer-events-none"></div>
+                <h3 className="text-lg font-bold flex items-center mb-4 relative z-10 text-indigo-200">
+                    <Palette className="w-5 h-5 mr-2 text-indigo-500" />
+                    卧室风格模版 (Style Templates)
+                </h3>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                    {bedroomStyleTemplates.map((template, idx) => (
+                        <button
+                            key={idx}
+                            onClick={() => handleSelectScene(template)}
+                            className="text-center p-2 bg-slate-800/40 hover:bg-indigo-900/30 border border-slate-700 hover:border-indigo-500/50 rounded-lg transition-all group"
+                        >
+                            <span className="text-[10px] font-bold text-slate-300 group-hover:text-white block truncate" title={template.name_cn}>
+                                {template.name_cn}
+                            </span>
+                            <span className="text-[8px] text-slate-500 font-mono block truncate" title={template.name}>
+                                {template.name}
+                            </span>
+                        </button>
+                    ))}
+                </div>
+            </div>
+
             {/* Master Creative Mode Card */}
-            <div className="relative group rounded-2xl p-[1px] bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 shadow-lg shadow-purple-500/20">
+            <div id="creative-mode-section" className="relative group rounded-2xl p-[1px] bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 shadow-lg shadow-purple-500/20">
                 <div className="bg-slate-900 rounded-2xl p-5 relative overflow-hidden">
                      <div className="absolute top-0 right-0 -mr-8 -mt-8 w-32 h-32 bg-purple-500 opacity-20 rounded-full blur-3xl pointer-events-none"></div>
                      <h3 className="text-lg font-bold flex items-center mb-2 relative z-10 text-transparent bg-clip-text bg-gradient-to-r from-white to-purple-200"><Palette className="w-5 h-5 mr-2 text-purple-400" />大师创意模式 <span className="text-[10px] ml-2 text-purple-400/60 font-mono border border-purple-500/30 px-1 rounded">PRO</span></h3>

@@ -28,6 +28,7 @@ export interface SavedProject {
   name: string;
   mainImage: string | null;
   productName: string;
+  productMaterial?: string;
   lightingSuggestion: string;
   generatedResults: GeneratedResult[];
   customPrompt?: string;

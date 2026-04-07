@@ -77,3 +77,44 @@ export const bedroomStyleTemplates: StyleTemplate[] = [
   { name: 'Tactilism', name_cn: '触感主义风', promptSuffix: 'in a texture-rich tactilism bedroom, layered fabrics, varied surface materials, sensory-focused design, soft tactile comfort' },
   { name: 'Digital Zen', name_cn: '数字禅风', promptSuffix: 'in a futuristic digital zen bedroom, clean white surfaces, integrated smart lighting, ethereal atmosphere, technological serenity' },
 ];
+
+export interface Category {
+  id: string;
+  name: string;
+}
+
+export const categories: Category[] = [
+  { id: 'bedding', name: '四件套' },
+  { id: 'pillow', name: '枕头' },
+  { id: 'mattress', name: '床垫' },
+  { id: 'quilt', name: '被子' },
+  { id: 'furniture', name: '家具' },
+];
+
+export interface AssetPreset {
+  id: string;
+  name: string;
+  imageUrl: string;
+  promptSuffix: string;
+}
+
+export const assetPresets: AssetPreset[] = [
+  { 
+    id: 'model_1', 
+    name: '亚洲女性', 
+    imageUrl: 'https://picsum.photos/seed/model1/200/200',
+    promptSuffix: 'with a beautiful Asian female model relaxing in the scene, natural lifestyle photography'
+  },
+  { 
+    id: 'scene_1', 
+    name: '温馨卧室', 
+    imageUrl: 'https://picsum.photos/seed/scene1/200/200',
+    promptSuffix: 'in a cozy warm bedroom with soft sunlight streaming through windows'
+  },
+  { 
+    id: 'composition_1', 
+    name: '铺设展示', 
+    imageUrl: 'https://picsum.photos/seed/comp1/200/200',
+    promptSuffix: 'neatly laid out on a bed, professional catalog photography, top-down perspective'
+  },
+];

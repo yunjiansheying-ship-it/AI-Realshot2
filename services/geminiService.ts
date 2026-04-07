@@ -209,12 +209,32 @@ export const generateImage = async (
   promptSuffix: string,
   config: ServiceConfig,
   mainImageBase64?: string | null,
-  refImageBase64?: string | null
+  refImageBase64?: string | null,
+  additionalRefs?: { 
+    model?: string | null, 
+    scene?: string | null, 
+    composition?: string | null,
+    category?: string,
+    modelAssetType?: string,
+    compositionWeight?: number,
+    isVectorStyle?: boolean
+  }
 ): Promise<string | null> => {
   const ai = getAiClient();
-  const fullPrompt = `${productName} ${promptSuffix}`.trim();
+  let fullPrompt = `${productName} ${promptSuffix}`.trim();
+  
+  if (additionalRefs?.isVectorStyle) {
+    fullPrompt = `${fullPrompt}. 
+    STRICT COMPOSITION REFERENCE: The [IMAGE_COMPOSITION] is a minimalist vector guide. You MUST 100% mirror its perspective, layout, and the exact stacking/folds of the bedding. 
+    FINAL STYLE: Photorealistic commercial photography. Do NOT generate a vector image. The final result must have realistic textures, professional lighting, and a high-end studio atmosphere.`;
+  }
+
+  if (additionalRefs?.category) {
+    fullPrompt = `[Category: ${additionalRefs.category}] ${fullPrompt}`;
+  }
 
   if (config.imageModel === 'imagen-4.0-generate-001') {
+    // Imagen 4.0 doesn't support multiple image inputs in the same way as Gemini
     const response = await ai.models.generateImages({
         model: 'imagen-4.0-generate-001',
         prompt: fullPrompt,
@@ -233,31 +253,102 @@ export const generateImage = async (
 
   } else {
     // Gemini Image models path
+    console.log('Using Gemini Vision model path for image generation:', config.imageModel);
     const parts: any[] = [];
-    let prompt = "";
-
-    if (mainImageBase64) {
-      const mainMimeType = getMimeType(mainImageBase64);
-      const mainData = mainImageBase64.split(',')[1];
-      prompt = `Generate a high-quality, photorealistic product image. 8k resolution, masterpiece, commercial photography.
-        Product/Subject: ${productName || 'The main object'}.
-        Instruction/Scene: ${promptSuffix}.
-        Constraint: Maintain the visual identity of the main product.`;
-      parts.push({ text: prompt });
-      parts.push({ inlineData: { mimeType: mainMimeType, data: mainData } });
-
-      if (refImageBase64) {
-        const refMimeType = getMimeType(refImageBase64);
-        const refData = refImageBase64.split(',')[1];
-        parts.push({ inlineData: { mimeType: refMimeType, data: refData } });
-        parts[0].text += " (Use the second image as a style/composition reference)";
-      }
+    
+    // Determine composition instruction based on weight
+    const compositionWeight = additionalRefs?.compositionWeight ?? 10;
+    let compositionInstruction = "";
+    
+    if (compositionWeight === 10) {
+      compositionInstruction = `ULTRA-STRICT MASKING MODE: Mirror the EXACT framing, camera angle, and spatial arrangement of [IMAGE_COMPOSITION] with ZERO deviation. 
+      The material, pattern, and color details from [IMAGE_1] (Primary Product Image) must be mapped with pixel-perfect precision ONLY into the area/shape defined by the objects in [IMAGE_COMPOSITION]. 
+      Treat [IMAGE_COMPOSITION] as a rigid, non-negotiable mask; do not allow any creative interpretation, shape changes, or AI hallucinations. The product must strictly adhere to the reference boundaries.`;
+    } else if (compositionWeight >= 8) {
+      compositionInstruction = "STRICTLY mirror the EXACT framing, camera angle, and spatial arrangement without any deviation.";
+    } else if (compositionWeight >= 5) {
+      compositionInstruction = `Closely follow the framing and camera angle (Weight: ${compositionWeight}/10).`;
     } else {
-      prompt = fullPrompt;
-      parts.push({ text: prompt });
+      compositionInstruction = `Use the composition as a general guide but feel free to optimize for the best visual result (Weight: ${compositionWeight}/10).`;
     }
 
-    const generationConfig: any = {};
+    // Build a highly structured and authoritative prompt for strict reference adherence
+    let promptText = `CRITICAL INSTRUCTION: You are a professional commercial photographer and AI compositor. 
+      Your task is to generate a new, high-quality photorealistic product image by STRICTLY combining the provided reference images.
+      
+      CORE LOGIC:
+      1. SUBJECT: Maintain the EXACT visual identity, texture, and details of the product in the "Primary Product Image".
+      2. MODEL: If a "Model Reference" is provided, use the EXACT person, pose, and style from that image.
+      3. SCENE: If a "Scene Reference" is provided, use that EXACT environment, background, and lighting as the setting.
+      4. COMPOSITION: If a "Composition Reference" is provided, ${compositionInstruction}
+      
+      Product Name: ${productName || 'The main product'}.
+      Category: ${additionalRefs?.category || 'General Product'}.
+      ${additionalRefs?.modelAssetType === 'no_model' 
+        ? 'MODEL REQUIREMENT: NO MODEL. Do not include any human models in the image. Focus purely on the product and scene.' 
+        : (additionalRefs?.modelAssetType && !additionalRefs?.model
+          ? `MODEL REQUIREMENT: Include a high-quality, professional ${additionalRefs.modelAssetType.replace('_', ' ')} model interacting with the product. Generate a random, high-quality model based on this type since no reference is provided.`
+          : (additionalRefs?.modelAssetType ? `Model Type: ${additionalRefs.modelAssetType}.` : ''))}
+      
+      Style/Mood: ${promptSuffix}.
+      Technical: 8k resolution, masterpiece, high-end commercial photography, sharp focus, professional lighting.`;
+
+    if (additionalRefs?.isVectorStyle) {
+      promptText += `\nCOMPOSITION GUIDANCE: 
+      - [IMAGE_COMPOSITION] is a minimalist vector line art used ONLY for structural guidance.
+      - Maintain 100% structural consistency with the perspective and layout defined in [IMAGE_COMPOSITION].
+      - The FINAL OUTPUT must be a PHOTOREALISTIC commercial photograph with high-end textures and realistic lighting.
+      - Do NOT output vector lines or a white background unless specified in the scene.`;
+    }
+
+    parts.push({ text: promptText });
+
+    if (mainImageBase64) {
+      console.log('Adding main product image to parts');
+      const mainMimeType = getMimeType(mainImageBase64);
+      const mainData = mainImageBase64.split(',')[1];
+      parts.push({ inlineData: { mimeType: mainMimeType, data: mainData } });
+      parts[0].text += "\n[IMAGE_1]: Primary Product Image. This is the main product that MUST be featured.";
+    }
+
+    if (refImageBase64) {
+      console.log('Adding style reference image to parts');
+      const refMimeType = getMimeType(refImageBase64);
+      const refData = refImageBase64.split(',')[1];
+      parts.push({ inlineData: { mimeType: refMimeType, data: refData } });
+      parts[0].text += "\n[IMAGE_2]: Style/Mood Reference. Use this for overall aesthetic inspiration.";
+    }
+
+    // Handle additional Pro references with explicit labels
+    if (additionalRefs) {
+      if (additionalRefs.model) {
+        console.log('Adding model reference image to parts');
+        const mime = getMimeType(additionalRefs.model);
+        const data = additionalRefs.model.split(',')[1];
+        parts.push({ inlineData: { mimeType: mime, data } });
+        parts[0].text += "\n[IMAGE_MODEL]: Model Reference. Strictly follow the person and pose in this image.";
+      }
+      if (additionalRefs.scene) {
+        console.log('Adding scene reference image to parts');
+        const mime = getMimeType(additionalRefs.scene);
+        const data = additionalRefs.scene.split(',')[1];
+        parts.push({ inlineData: { mimeType: mime, data } });
+        parts[0].text += "\n[IMAGE_SCENE]: Scene Reference. Strictly use this background and environment.";
+      }
+      if (additionalRefs.composition) {
+        console.log('Adding composition reference image to parts');
+        const mime = getMimeType(additionalRefs.composition);
+        const data = additionalRefs.composition.split(',')[1];
+        parts.push({ inlineData: { mimeType: mime, data } });
+        parts[0].text += "\n[IMAGE_COMPOSITION]: Composition Reference. Strictly follow this framing and camera angle.";
+      }
+    }
+
+    const generationConfig: any = {
+      temperature: 1.0,
+      topP: 0.95,
+      topK: 64,
+    };
     
     // Construct imageConfig for Gemini models
     generationConfig.imageConfig = {
@@ -268,18 +359,22 @@ export const generateImage = async (
       generationConfig.imageConfig.imageSize = config.imageResolution;
     }
 
+    console.log('Calling generateContent with parts:', JSON.stringify(parts.map(p => p.text ? { text: p.text.substring(0, 50) + '...' } : { inlineData: { mimeType: p.inlineData.mimeType, dataSize: p.inlineData.data.length } })));
     const response = await ai.models.generateContent({
       model: config.imageModel,
       contents: { parts },
       config: generationConfig,
     });
 
+    console.log('Gemini API response received');
     for (const part of response.candidates?.[0]?.content?.parts || []) {
       if (part.inlineData) {
+        console.log('Image part found in response');
         return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
       }
     }
 
+    console.warn('No image part found in Gemini response');
     return null;
   }
 };
@@ -341,3 +436,49 @@ export const getDynamicAnglePrompts = async (imageBase64: string, existingAngles
 
     return dynamicPrompts.slice(0, 2);
 }
+
+export const vectorizeImage = async (imageBase64: string, config: ServiceConfig): Promise<string | null> => {
+  const ai = getAiClient();
+  const mimeType = getMimeType(imageBase64);
+  const data = imageBase64.split(',')[1];
+  
+  const promptText = `
+    TASK: Convert this bedroom photography into a MINIMALIST VECTOR LINE DRAWING for use as a composition reference.
+    
+    STRICT REQUIREMENTS:
+    1. BACKGROUND: Pure white background.
+    2. LINES: Use clean, equal-thickness black lines for all outlines.
+    3. SIMPLIFICATION: Remove all textures, shadows, gradients, and complex details.
+    4. SUBJECTS: If there are people, simplify them into clean line outlines.
+    5. FOCUS: Maintain the EXACT perspective, layout, and bedding (quilt, pillows) folds from the original image.
+    6. COLORING: ONLY fill the bedding (quilt and pillows) with flat, solid colors (e.g., light blue or grey) to highlight them as the focal point. The rest of the image must remain black and white line art.
+    
+    OUTPUT: A high-quality minimalist vector illustration that mirrors the original composition perfectly.
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: config.imageModel,
+      contents: {
+        parts: [
+          { text: promptText },
+          { inlineData: { mimeType, data } }
+        ]
+      },
+      config: {
+        imageConfig: {
+          aspectRatio: "1:1" // Or detect from image
+        }
+      }
+    });
+
+    for (const part of response.candidates?.[0]?.content?.parts || []) {
+      if (part.inlineData) {
+        return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+      }
+    }
+  } catch (e) {
+    console.error("Vectorization failed:", e);
+  }
+  return null;
+};

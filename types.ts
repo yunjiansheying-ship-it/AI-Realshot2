@@ -9,6 +9,7 @@ export interface GeneratedResult {
   status: 'loading' | 'completed' | 'error' | 'analyzing';
   finalPrompt: string;
   isDynamic: boolean;
+  isVector?: boolean;
   errorMessage?: string;
   description_cn?: string;
 }

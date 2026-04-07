@@ -4,7 +4,7 @@ import {
   Upload, ImageIcon, Camera, Download, Maximize2, RefreshCw, Sparkles,
   Layers, Eye, Wand2, Copy, Check, AlertCircle, X, Trash2,
   Shuffle, BrainCircuit, Edit, Cpu, Lock, Loader2, ImagePlus, MessageSquarePlus, Palette, Lightbulb, Settings, Save, ChevronDown, Monitor, Zap, FolderOpen, Clock,
-  Square, Copyright, Play
+  Square, Copyright, Play, ShieldCheck
 } from 'lucide-react';
 import { GeneratedResult, Angle, SavedProject } from '../types';
 import { staticAngles, dynamicAngleSlots, bedroomStyleTemplates, StyleTemplate } from '../constants';
@@ -17,7 +17,8 @@ import {
   translatePromptToEnglish,
   getPromptFromImage,
   getBedroomSceneSuggestions,
-  BedroomScene
+  BedroomScene,
+  vectorizeImage
 } from '../services/geminiService';
 import GenerationLoader from './GenerationLoader';
 
@@ -51,6 +52,23 @@ const AIProductStudio = ({ onRequireKey }: Props = {}) => {
   const [bedroomScenes, setBedroomScenes] = useState<BedroomScene[]>([]);
   const [isAnalyzingMaterial, setIsAnalyzingMaterial] = useState(false);
   const [lightingSuggestion, setLightingSuggestion] = useState('');
+
+  // Pro Studio State
+  const [activeTab, setActiveTab] = useState<'standard' | 'pro'>('standard');
+  const [category, setCategory] = useState('四件套');
+  const [modelAssetType, setModelAssetType] = useState('');
+  const [modelImage, setModelImage] = useState<string | null>(null);
+  const [sceneImage, setSceneImage] = useState<string | null>(null);
+  const [compositionImages, setCompositionImages] = useState<string[]>([]);
+  const [compositionWeight, setCompositionWeight] = useState(10);
+  const [isVectorMode, setIsVectorMode] = useState(false);
+  const [isVectorizing, setIsVectorizing] = useState(false);
+  const [isGeneratingPro, setIsGeneratingPro] = useState(false);
+
+  const modelInputRef = useRef<HTMLInputElement>(null);
+  const sceneInputRef = useRef<HTMLInputElement>(null);
+  const compositionInputRef = useRef<HTMLInputElement>(null);
+
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedResults, setGeneratedResults] = useState<GeneratedResult[]>([]);
   const [copiedId, setCopiedId] = useState<number | null>(null);
@@ -413,7 +431,7 @@ const AIProductStudio = ({ onRequireKey }: Props = {}) => {
                                   
                                   const now = new Date();
                                   const timeString = now.toLocaleString('zh-CN', { hour12: false });
-                                  const text = `© AI RealShot | ${timeString}`;
+                                  const text = `© 云坚Dream | ${timeString}`;
                                   
                                   ctx.font = `bold ${fontSize}px sans-serif`;
                                   ctx.textAlign = 'right';
@@ -513,6 +531,7 @@ const AIProductStudio = ({ onRequireKey }: Props = {}) => {
         abortControllerRef.current = null;
     }
     setIsGenerating(false);
+    setIsGeneratingPro(false);
     setIsGeneratingCustom(false);
     setIsThinkingConcept(false);
     setIsRemixing(false);
@@ -569,8 +588,101 @@ const AIProductStudio = ({ onRequireKey }: Props = {}) => {
     if (!signal.aborted) setIsGenerating(false);
   };
 
+  const handleProGenerate = async () => {
+    if (!mainImage) {
+      alert('请先上传产品实拍图');
+      return;
+    }
+
+    // Validation for Pro Studio materials
+    if (!modelAssetType && !modelImage) {
+      alert('请上传模特参考图');
+      return;
+    }
+    if (compositionImages.length === 0) {
+      alert('请上传构图参考图');
+      return;
+    }
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const { signal } = controller;
+
+    setIsGeneratingPro(true);
+
+    const proPromises = compositionImages.map(async (compImg, index) => {
+      if (signal.aborted) return;
+      
+      const newId = Date.now() + index;
+      const newResult: GeneratedResult = {
+        id: newId,
+        name: `专业制图: ${category} (${index + 1}/${compositionImages.length})`,
+        type: 'Pro Studio',
+        status: 'loading',
+        finalPrompt: `Professional product photography for ${category}. ${productName}`,
+        imageUrl: null,
+        isDynamic: true,
+        isVector: isVectorMode,
+        description_cn: `使用专业模式生成的 ${category} 场景 (构图 #${index + 1})${isVectorMode ? ' [精准构图]' : ''}`
+      };
+      setGeneratedResults(prev => [newResult, ...prev]);
+
+      try {
+        console.log(`Starting Pro Generate #${index + 1} with category:`, category);
+        const url = await generateImage(
+          productName || category,
+          `Professional commercial photography for ${category}, high-end lighting, masterpiece, 8k`,
+          getServiceConfig(),
+          mainImage,
+          null,
+          {
+            model: modelImage,
+            scene: sceneImage,
+            composition: compImg,
+            category: category,
+            modelAssetType: modelAssetType,
+            compositionWeight: compositionWeight,
+            isVectorStyle: isVectorMode
+          }
+        );
+        console.log(`Pro Generate #${index + 1} URL result:`, url);
+        if (signal.aborted) {
+          updateResult(newId, { status: 'error', errorMessage: '用户已终止' });
+        } else {
+          updateResult(newId, { imageUrl: url, status: url ? 'completed' : 'error', errorMessage: url ? undefined : '生成失败：模型未返回图像，请尝试更换模型或调整参数' });
+        }
+      } catch (e) {
+        console.error(`Pro Generate #${index + 1} Error:`, e);
+        if (!signal.aborted) updateResult(newId, { status: 'error', errorMessage: processGenerationError(e) });
+      }
+    });
+
+    await Promise.all(proPromises);
+
+    if (!signal.aborted) setIsGeneratingPro(false);
+  };
+
+  const handleVectorizeCompositions = async () => {
+    if (compositionImages.length === 0) return;
+    setIsVectorizing(true);
+    try {
+      const vectorized = await Promise.all(
+        compositionImages.map(img => vectorizeImage(img, getServiceConfig()))
+      );
+      const validVectorized = vectorized.filter((img): img is string => img !== null);
+      if (validVectorized.length > 0) {
+        setCompositionImages(validVectorized);
+        setIsVectorMode(true);
+      }
+    } catch (e) {
+      console.error("Vectorization error:", e);
+    } finally {
+      setIsVectorizing(false);
+    }
+  };
+
   const handleGenerate = async (anglesToGenerate: Angle[]) => {
-    if (!mainImage || (isImagenModel && mainImage)) return;
+    if (!mainImage) return;
     
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -1062,10 +1174,25 @@ const AIProductStudio = ({ onRequireKey }: Props = {}) => {
                 </div>
             </div>
             <span className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-300 via-purple-300 to-pink-300 tracking-wide">
-              AI RealShot <span className="text-xs font-mono text-slate-500 ml-1 border border-slate-700 px-1 rounded bg-slate-900/50">PRO_GEN_V3.1</span>
+              云坚Dream
             </span>
           </div>
           <div className="flex items-center gap-4">
+             {/* Tab Switcher */}
+             <div className="flex bg-slate-800/50 p-1 rounded-lg border border-slate-700">
+                <button 
+                  onClick={() => setActiveTab('standard')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${activeTab === 'standard' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-200'}`}
+                >
+                  标准模式
+                </button>
+                <button 
+                  onClick={() => setActiveTab('pro')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${activeTab === 'pro' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-200'}`}
+                >
+                  专业模式
+                </button>
+             </div>
              <button 
                 onClick={() => setIsProjectManagerOpen(true)}
                 className="flex items-center px-4 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-slate-300 hover:text-white transition-all text-xs font-bold"
@@ -1083,261 +1210,539 @@ const AIProductStudio = ({ onRequireKey }: Props = {}) => {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           <div className="lg:col-span-4 space-y-6">
-            {/* Upload Card */}
-            <div className="bg-slate-900/40 backdrop-blur-md rounded-2xl border border-white/5 p-6 shadow-xl relative overflow-hidden group">
-               <div className="absolute inset-0 bg-gradient-to-b from-indigo-500/5 to-transparent pointer-events-none"></div>
-              <div className="flex justify-between items-center mb-4 relative z-10">
-                <h2 className="text-lg font-bold flex items-center text-indigo-200">
-                  <ImageIcon className="w-5 h-5 mr-2 text-indigo-500" />
-                  原图上传 <span className="text-[10px] ml-2 text-slate-500 font-mono">SOURCE_INPUT</span>
-                </h2>
-                {(mainImage || productName) && (
-                  <button onClick={handleSaveProject} className="text-[10px] flex items-center bg-indigo-900/40 hover:bg-indigo-800/60 text-indigo-300 px-2 py-1 rounded border border-indigo-500/30 transition-colors" title="保存当前项目">
-                     <Save className="w-3 h-3 mr-1" /> 保存
-                  </button>
-                )}
-              </div>
-              <div className={`relative border-2 border-dashed rounded-xl p-8 text-center transition-all duration-300 overflow-hidden ${mainImage ? 'border-indigo-500/50 bg-indigo-950/20' : 'border-slate-700 hover:border-indigo-500/50 hover:bg-slate-800/50'}`}>
-                <input type="file" ref={fileInputRef} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" onChange={handleImageUpload} accept="image/*" />
-                {mainImage ? (
-                  <div className="relative group">
-                    <img src={mainImage} alt="Uploaded" className="w-full h-64 object-contain rounded-lg shadow-lg mx-auto" />
-                    <button onClick={removeImage} className="absolute top-2 right-2 p-2 bg-slate-900/80 rounded-full text-red-400 hover:text-red-300 border border-red-500/30 shadow-md hover:bg-red-950/50 z-20 pointer-events-auto transition-transform hover:scale-110"><Trash2 className="w-4 h-4" /></button>
-                    <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-lg z-10 pointer-events-none backdrop-blur-sm"><p className="text-white font-medium flex items-center"><RefreshCw className="w-4 h-4 mr-2" />更换图片</p></div>
-                  </div>
-                ) : (
-                  <div className="space-y-4 py-8 pointer-events-none">
-                    <div className="w-16 h-16 bg-slate-800/50 border border-slate-700 text-indigo-400 rounded-full flex items-center justify-center mx-auto shadow-[0_0_15px_rgba(99,102,241,0.2)]"><Upload className="w-8 h-8" /></div>
-                    <div><p className="text-slate-300 font-medium">点击上传商品图</p><p className="text-slate-500 text-xs mt-1 font-mono">JPG / PNG / WEBP</p></div>
-                  </div>
-                )}
-              </div>
-              {mainImage && (
-                <button onClick={analyzeImageWithGemini} disabled={isAnalyzing} className="w-full mt-3 py-2 px-3 bg-indigo-950/50 hover:bg-indigo-900/50 text-indigo-300 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center border border-indigo-500/30 hover:border-indigo-400/50">
-                   {isAnalyzing ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <Eye className="w-3 h-3 mr-2" />}
-                   {isAnalyzing ? "正在进行量子解析..." : "第一步：AI 识别商品特征"}
-                </button>
-              )}
-              <div className="mt-4 relative z-10">
-                 <div className="flex justify-between items-center mb-1.5">
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center"><Zap className="w-3 h-3 mr-1 text-yellow-500" />辅助描述</label>
-                    <button onClick={optimizePromptWithGemini} disabled={!productName || isOptimizing} className="text-[10px] text-purple-300 hover:text-purple-200 font-bold flex items-center bg-purple-950/30 border border-purple-500/30 px-2 py-1 rounded-md transition-colors disabled:opacity-50">
-                      {isOptimizing ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Wand2 className="w-3 h-3 mr-1" />}
-                      {isOptimizing ? "优化中" : "AI 润色"}
-                    </button>
-                  </div>
-                  <textarea rows={2} value={productName} onChange={(e) => setProductName(e.target.value)} placeholder="核心描述，例如：Nike Air Max 红色运动鞋..." className="w-full px-4 py-2.5 bg-slate-950/50 border border-slate-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all text-sm resize-none text-slate-200 placeholder-slate-600" />
-              </div>
-
-              {/* Material Analysis Section */}
-              <div className="mt-4 relative z-10">
-                <div className="flex justify-between items-center mb-1.5">
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center">
-                    <Palette className="w-3 h-3 mr-1 text-indigo-400" />
-                    主体材质 (Material)
-                  </label>
-                  <button 
-                    onClick={handleAnalyzeMaterial} 
-                    disabled={!productMaterial || isAnalyzingMaterial} 
-                    className="text-[10px] text-indigo-300 hover:text-indigo-200 font-bold flex items-center bg-indigo-950/30 border border-indigo-500/30 px-2 py-1 rounded-md transition-colors disabled:opacity-50"
-                  >
-                    {isAnalyzingMaterial ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <BrainCircuit className="w-3 h-3 mr-1" />}
-                    分析场景
-                  </button>
-                </div>
-                <input 
-                  type="text" 
-                  value={productMaterial} 
-                  onChange={(e) => setProductMaterial(e.target.value)} 
-                  placeholder="例如：纯棉、真丝、实木、金属..." 
-                  className="w-full px-4 py-2 bg-slate-950/50 border border-slate-700 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm text-slate-200 placeholder-slate-600" 
-                />
-              </div>
-
-              {bedroomScenes.length > 0 && (
-                <div className="mt-4 space-y-2 animate-in fade-in slide-in-from-top-2 duration-300">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">推荐卧室场景 (Recommended Scenes)</label>
-                  <div className="grid grid-cols-1 gap-2">
-                    {bedroomScenes.map((scene, idx) => (
-                      <button 
-                        key={idx}
-                        onClick={() => handleSelectScene(scene)}
-                        className="text-left p-3 bg-slate-800/40 hover:bg-indigo-900/20 border border-slate-700 hover:border-indigo-500/50 rounded-xl transition-all group"
-                      >
-                        <div className="flex justify-between items-center mb-1">
-                          <span className="text-xs font-bold text-indigo-300 group-hover:text-indigo-200">{scene.name_cn}</span>
-                          <span className="text-[10px] text-slate-500 font-mono">{scene.name}</span>
-                        </div>
-                        <p className="text-[10px] text-slate-400 line-clamp-1">{scene.description_cn}</p>
+            {activeTab === 'standard' ? (
+              <>
+                {/* Upload Card */}
+                <div className="bg-slate-900/40 backdrop-blur-md rounded-2xl border border-white/5 p-6 shadow-xl relative overflow-hidden group">
+                   <div className="absolute inset-0 bg-gradient-to-b from-indigo-500/5 to-transparent pointer-events-none"></div>
+                  <div className="flex justify-between items-center mb-4 relative z-10">
+                    <h2 className="text-lg font-bold flex items-center text-indigo-200">
+                      <ImageIcon className="w-5 h-5 mr-2 text-indigo-500" />
+                      原图上传 <span className="text-[10px] ml-2 text-slate-500 font-mono">SOURCE_INPUT</span>
+                    </h2>
+                    {(mainImage || productName) && (
+                      <button onClick={handleSaveProject} className="text-[10px] flex items-center bg-indigo-900/40 hover:bg-indigo-800/60 text-indigo-300 px-2 py-1 rounded border border-indigo-500/30 transition-colors" title="保存当前项目">
+                         <Save className="w-3 h-3 mr-1" /> 保存
                       </button>
-                    ))}
+                    )}
                   </div>
-                </div>
-              )}
+                  <div className={`relative border-2 border-dashed rounded-xl p-8 text-center transition-all duration-300 overflow-hidden ${mainImage ? 'border-indigo-500/50 bg-indigo-950/20' : 'border-slate-700 hover:border-indigo-500/50 hover:bg-slate-800/50'}`}>
+                    <input type="file" ref={fileInputRef} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" onChange={handleImageUpload} accept="image/*" />
+                    {mainImage ? (
+                      <div className="relative group">
+                        <img src={mainImage} alt="Uploaded" className="w-full h-64 object-contain rounded-lg shadow-lg mx-auto" />
+                        <button onClick={removeImage} className="absolute top-2 right-2 p-2 bg-slate-900/80 rounded-full text-red-400 hover:text-red-300 border border-red-500/30 shadow-md hover:bg-red-950/50 z-20 pointer-events-auto transition-transform hover:scale-110"><Trash2 className="w-4 h-4" /></button>
+                        <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-lg z-10 pointer-events-none backdrop-blur-sm"><p className="text-white font-medium flex items-center"><RefreshCw className="w-4 h-4 mr-2" />更换图片</p></div>
+                      </div>
+                    ) : (
+                      <div className="space-y-4 py-8 pointer-events-none">
+                        <div className="w-16 h-16 bg-slate-800/50 border border-slate-700 text-indigo-400 rounded-full flex items-center justify-center mx-auto shadow-[0_0_15px_rgba(99,102,241,0.2)]"><Upload className="w-8 h-8" /></div>
+                        <div><p className="text-slate-300 font-medium">点击上传商品图</p><p className="text-slate-500 text-xs mt-1 font-mono">JPG / PNG / WEBP</p></div>
+                      </div>
+                    )}
+                  </div>
+                  {mainImage && (
+                    <button onClick={analyzeImageWithGemini} disabled={isAnalyzing} className="w-full mt-3 py-2 px-3 bg-indigo-950/50 hover:bg-indigo-900/50 text-indigo-300 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center border border-indigo-500/30 hover:border-indigo-400/50">
+                       {isAnalyzing ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <Eye className="w-3 h-3 mr-2" />}
+                       {isAnalyzing ? "正在进行量子解析..." : "第一步：AI 识别商品特征"}
+                    </button>
+                  )}
+                  <div className="mt-4 relative z-10">
+                     <div className="flex justify-between items-center mb-1.5">
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center"><Zap className="w-3 h-3 mr-1 text-yellow-500" />辅助描述</label>
+                        <button onClick={optimizePromptWithGemini} disabled={!productName || isOptimizing} className="text-[10px] text-purple-300 hover:text-purple-200 font-bold flex items-center bg-purple-950/30 border border-purple-500/30 px-2 py-1 rounded-md transition-colors disabled:opacity-50">
+                          {isOptimizing ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Wand2 className="w-3 h-3 mr-1" />}
+                          {isOptimizing ? "优化中" : "AI 润色"}
+                        </button>
+                      </div>
+                      <textarea rows={2} value={productName} onChange={(e) => setProductName(e.target.value)} placeholder="核心描述，例如：Nike Air Max 红色运动鞋..." className="w-full px-4 py-2.5 bg-slate-950/50 border border-slate-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all text-sm resize-none text-slate-200 placeholder-slate-600" />
+                  </div>
 
-              {lightingSuggestion && (
-                  <div className="mt-4 p-3 bg-indigo-950/30 border border-indigo-500/20 rounded-lg">
-                      <div className="flex items-start">
-                          <Lightbulb className="w-4 h-4 mr-2 text-yellow-400 flex-shrink-0 mt-0.5" />
-                          <div>
-                              <h4 className="text-xs font-bold text-indigo-300">
-                                  AI 光照建议
-                              </h4>
-                              <p className="text-sm text-indigo-200/80 leading-relaxed mt-1">{lightingSuggestion}</p>
+                  {/* Material Analysis Section */}
+                  <div className="mt-4 relative z-10">
+                    <div className="flex justify-between items-center mb-1.5">
+                      <label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center">
+                        <Palette className="w-3 h-3 mr-1 text-indigo-400" />
+                        主体材质 (Material)
+                      </label>
+                      <button 
+                        onClick={handleAnalyzeMaterial} 
+                        disabled={!productMaterial || isAnalyzingMaterial} 
+                        className="text-[10px] text-indigo-300 hover:text-indigo-200 font-bold flex items-center bg-indigo-950/30 border border-indigo-500/30 px-2 py-1 rounded-md transition-colors disabled:opacity-50"
+                      >
+                        {isAnalyzingMaterial ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <BrainCircuit className="w-3 h-3 mr-1" />}
+                        分析场景
+                      </button>
+                    </div>
+                    <input 
+                      type="text" 
+                      value={productMaterial} 
+                      onChange={(e) => setProductMaterial(e.target.value)} 
+                      placeholder="例如：纯棉、真丝、实木、金属..." 
+                      className="w-full px-4 py-2 bg-slate-950/50 border border-slate-700 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm text-slate-200 placeholder-slate-600" 
+                    />
+                  </div>
+
+                  {bedroomScenes.length > 0 && (
+                    <div className="mt-4 space-y-2 animate-in fade-in slide-in-from-top-2 duration-300">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">推荐卧室场景 (Recommended Scenes)</label>
+                      <div className="grid grid-cols-1 gap-2">
+                        {bedroomScenes.map((scene, idx) => (
+                          <button 
+                            key={idx}
+                            onClick={() => handleSelectScene(scene)}
+                            className="text-left p-3 bg-slate-800/40 hover:bg-indigo-900/20 border border-slate-700 hover:border-indigo-500/50 rounded-xl transition-all group"
+                          >
+                            <div className="flex justify-between items-center mb-1">
+                              <span className="text-xs font-bold text-indigo-300 group-hover:text-indigo-200">{scene.name_cn}</span>
+                              <span className="text-[10px] text-slate-500 font-mono">{scene.name}</span>
+                            </div>
+                            <p className="text-[10px] text-slate-400 line-clamp-1">{scene.description_cn}</p>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {lightingSuggestion && (
+                      <div className="mt-4 p-3 bg-indigo-950/30 border border-indigo-500/20 rounded-lg">
+                          <div className="flex items-start">
+                              <Lightbulb className="w-4 h-4 mr-2 text-yellow-400 flex-shrink-0 mt-0.5" />
+                              <div>
+                                  <h4 className="text-xs font-bold text-indigo-300">
+                                      AI 光照建议
+                                  </h4>
+                                  <p className="text-sm text-indigo-200/80 leading-relaxed mt-1">{lightingSuggestion}</p>
+                              </div>
                           </div>
                       </div>
-                  </div>
-              )}
-            </div>
-
-            {/* Bedroom Style Templates Card */}
-            <div className="bg-slate-900/40 backdrop-blur-md rounded-2xl border border-white/5 p-6 shadow-xl relative overflow-hidden">
-                <div className="absolute inset-0 bg-gradient-to-b from-purple-500/5 to-transparent pointer-events-none"></div>
-                <h3 className="text-lg font-bold flex items-center mb-4 relative z-10 text-indigo-200">
-                    <Palette className="w-5 h-5 mr-2 text-indigo-500" />
-                    卧室风格模版 (Style Templates)
-                </h3>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
-                    {bedroomStyleTemplates.map((template, idx) => (
-                        <button
-                            key={idx}
-                            onClick={() => handleSelectScene(template)}
-                            className="text-center p-2 bg-slate-800/40 hover:bg-indigo-900/30 border border-slate-700 hover:border-indigo-500/50 rounded-lg transition-all group"
-                        >
-                            <span className="text-[10px] font-bold text-slate-300 group-hover:text-white block truncate" title={template.name_cn}>
-                                {template.name_cn}
-                            </span>
-                            <span className="text-[8px] text-slate-500 font-mono block truncate" title={template.name}>
-                                {template.name}
-                            </span>
-                        </button>
-                    ))}
+                  )}
                 </div>
-            </div>
 
-            {/* Master Creative Mode Card */}
-            <div id="creative-mode-section" className="relative group rounded-2xl p-[1px] bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 shadow-lg shadow-purple-500/20">
-                <div className="bg-slate-900 rounded-2xl p-5 relative overflow-hidden">
-                     <div className="absolute top-0 right-0 -mr-8 -mt-8 w-32 h-32 bg-purple-500 opacity-20 rounded-full blur-3xl pointer-events-none"></div>
-                     <h3 className="text-lg font-bold flex items-center mb-2 relative z-10 text-transparent bg-clip-text bg-gradient-to-r from-white to-purple-200"><Palette className="w-5 h-5 mr-2 text-purple-400" />大师创意模式 <span className="text-[10px] ml-2 text-purple-400/60 font-mono border border-purple-500/30 px-1 rounded">PRO</span></h3>
-                     <p className="text-slate-400 text-xs mb-3 relative z-10">输入想法，或<span className="font-bold text-purple-300 mx-1">留空</span>点击生成，AI 将智能构思贴合产品的场景。</p>
-                     <div className="relative z-10 space-y-3">
-                         <input type="text" value={customPrompt} onChange={(e) => setCustomPrompt(e.target.value)} placeholder="留空，AI 智能构思独特场景..." className="w-full px-4 py-2.5 bg-black/40 border border-purple-500/30 rounded-lg text-white placeholder-slate-600 focus:bg-black/60 focus:outline-none focus:ring-2 focus:ring-purple-500/50 text-sm backdrop-blur-sm transition-all" />
-                         <button 
-                            onClick={isCustomGenerating ? handleStop : handleCustomGenerate} 
-                            disabled={!mainImage || (isImagenModel && !!mainImage)} 
-                            className={`w-full py-2.5 rounded-lg font-bold text-sm transition-all flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed group border border-white/10 ${isCustomGenerating ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-[0_0_15px_rgba(192,38,211,0.3)] hover:shadow-[0_0_25px_rgba(192,38,211,0.5)]'}`}
-                         >
-                             {isCustomGenerating ? (
-                                <><Square className="w-4 h-4 mr-2 fill-current" /> 停止生成</>
-                             ) : (
-                                customPrompt.trim() ? <><MessageSquarePlus className="w-4 h-4 mr-2" />生成创意</> : <><Shuffle className="w-4 h-4 mr-2 group-hover:rotate-180 transition-transform" />大师级构思</>
-                             )}
-                         </button>
-                     </div>
-                </div>
-            </div>
-
-            {/* Image to Prompt Card */}
-            <div className="bg-slate-900/40 backdrop-blur-md rounded-2xl border border-teal-500/20 p-6 space-y-4 shadow-lg relative overflow-hidden">
-                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-teal-500 to-transparent opacity-50"></div>
-                <h3 className="text-lg font-bold flex items-center text-teal-300">
-                    <BrainCircuit className="w-5 h-5 mr-2" />
-                    智能垫图 (Image-to-Prompt)
-                </h3>
-                <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-2">1. 上传风格参考图</label>
-                    <div className={`relative border-2 border-dashed rounded-xl p-4 text-center transition-all duration-300 overflow-hidden ${reversePromptImage ? 'border-teal-500/50 bg-teal-950/20' : 'border-slate-700 hover:border-teal-500/50 hover:bg-slate-800/50'}`}>
-                        <input type="file" ref={reverseFileInputRef} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" onChange={handleReverseImageUpload} accept="image/*" />
-                        {reversePromptImage ? (
-                            <div className="relative group">
-                                <img src={reversePromptImage} alt="Reference for prompt" className="w-full h-32 object-contain rounded-lg shadow-sm mx-auto" />
-                                <button onClick={removeReverseImage} className="absolute top-1 right-1 p-1 bg-slate-900/80 rounded-full text-red-400 border border-red-500/30 z-20 pointer-events-auto transition-transform hover:scale-110"><Trash2 className="w-3 h-3" /></button>
-                            </div>
-                        ) : (
-                            <div className="space-y-2 py-4 pointer-events-none">
-                                <div className="w-10 h-10 bg-teal-950/50 border border-teal-500/30 text-teal-400 rounded-full flex items-center justify-center mx-auto shadow-[0_0_10px_rgba(20,184,166,0.2)]"><ImageIcon className="w-5 h-5" /></div>
-                                <div><p className="text-slate-400 font-medium text-sm">点击上传参考图</p></div>
-                            </div>
-                        )}
-                    </div>
-                </div>
-                <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-2">2. AI 反推提示词</label>
-                    <button
-                        onClick={handleAnalyzeForPrompt}
-                        disabled={!reversePromptImage || isAnalyzingForPrompt}
-                        className="w-full py-2 px-3 bg-teal-950/30 hover:bg-teal-900/50 text-teal-300 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center border border-teal-500/30 hover:border-teal-400/50 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        {isAnalyzingForPrompt ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <Wand2 className="w-3 h-3 mr-2" />}
-                        {isAnalyzingForPrompt ? "正在解码视觉信息..." : "分析图片 & 生成提示词"}
-                    </button>
-                    <textarea
-                        rows={4}
-                        value={generatedReversePrompt}
-                        onChange={(e) => setGeneratedReversePrompt(e.target.value)}
-                        placeholder="AI 将在此处生成可编辑的提示词..."
-                        className="mt-2 w-full px-4 py-2.5 bg-black/30 border border-slate-700 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm resize-none text-slate-300 placeholder-slate-600 font-mono"
-                        disabled={isAnalyzingForPrompt}
-                    />
-                </div>
-                <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-2">3. 生成新图片</label>
-                    <button
-                        onClick={handleGenerateFromPrompt}
-                        disabled={!generatedReversePrompt || isGeneratingFromPrompt}
-                        className="w-full py-2.5 bg-gradient-to-r from-teal-600 to-emerald-600 text-white rounded-lg font-bold text-sm shadow-[0_0_15px_rgba(13,148,136,0.3)] hover:shadow-[0_0_25px_rgba(13,148,136,0.5)] transition-all flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed border border-white/10"
-                    >
-                        {isGeneratingFromPrompt ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
-                        {isGeneratingFromPrompt ? "生成中..." : "开始文生图"}
-                    </button>
-                </div>
-            </div>
-
-            <div className="bg-slate-900/40 backdrop-blur-md rounded-2xl border border-white/5 p-6 shadow-lg">
-                <h3 className="text-sm font-bold text-slate-300 mb-3 flex items-center"><Layers className="w-4 h-4 mr-2 text-indigo-400" />批量智能视图 (10经典 + 2智能)</h3>
-                
-                <button 
-                  onClick={isGenerating ? handleStop : openEditModal} 
-                  disabled={!mainImage || (isImagenModel && !!mainImage)} 
-                  className={`w-full py-3 px-4 rounded-xl font-bold text-white shadow-lg transition-all transform active:scale-[0.98] mb-4 ${
-                    !mainImage || (isImagenModel && !!mainImage) 
-                      ? 'bg-slate-800 text-slate-500 cursor-not-allowed shadow-none border border-slate-700' 
-                      : isGenerating 
-                        ? 'bg-red-600 hover:bg-red-700' 
-                        : 'bg-gradient-to-r from-indigo-600 to-blue-600 hover:shadow-[0_0_20px_rgba(79,70,229,0.4)] border border-indigo-400/30'
-                  } flex items-center justify-center text-sm`}
-                >
-                  {isGenerating ? <><Square className="w-4 h-4 mr-2 fill-current" /> 停止生成 (Stop)</> : <><Sparkles className="w-4 h-4 mr-2" />一键批量生成 (Batch Gen)</>}
-                </button>
-
-                <div className="pt-3 border-t border-white/5">
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-2">单视角生成 (Single Shot)</label>
-                    <div className="flex gap-2">
-                        <div className="relative flex-1">
-                            <select
-                                value={selectedSingleAngleId}
-                                onChange={(e) => setSelectedSingleAngleId(Number(e.target.value))}
-                                disabled={!mainImage || (isImagenModel && !!mainImage) || isGenerating}
-                                className="w-full bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-slate-200 px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500 appearance-none disabled:opacity-50"
+                {/* Bedroom Style Templates Card */}
+                <div className="bg-slate-900/40 backdrop-blur-md rounded-2xl border border-white/5 p-6 shadow-xl relative overflow-hidden">
+                    <div className="absolute inset-0 bg-gradient-to-b from-purple-500/5 to-transparent pointer-events-none"></div>
+                    <h3 className="text-lg font-bold flex items-center mb-4 relative z-10 text-indigo-200">
+                        <Palette className="w-5 h-5 mr-2 text-indigo-500" />
+                        卧室风格模版 (Style Templates)
+                    </h3>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                        {bedroomStyleTemplates.map((template, idx) => (
+                            <button
+                                key={idx}
+                                onClick={() => handleSelectScene(template)}
+                                className="text-center p-2 bg-slate-800/40 hover:bg-indigo-900/30 border border-slate-700 hover:border-indigo-500/50 rounded-lg transition-all group"
                             >
-                                {staticAngles.map(angle => (
-                                    <option key={angle.id} value={angle.id}>{angle.name}</option>
-                                ))}
-                            </select>
-                            <ChevronDown className="absolute right-3 top-2.5 w-4 h-4 text-slate-500 pointer-events-none" />
+                                <span className="text-[10px] font-bold text-slate-300 group-hover:text-white block truncate" title={template.name_cn}>
+                                    {template.name_cn}
+                                </span>
+                                <span className="text-[8px] text-slate-500 font-mono block truncate" title={template.name}>
+                                    {template.name}
+                                </span>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Master Creative Mode Card */}
+                <div id="creative-mode-section" className="relative group rounded-2xl p-[1px] bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 shadow-lg shadow-purple-500/20">
+                    <div className="bg-slate-900 rounded-2xl p-5 relative overflow-hidden">
+                         <div className="absolute top-0 right-0 -mr-8 -mt-8 w-32 h-32 bg-purple-500 opacity-20 rounded-full blur-3xl pointer-events-none"></div>
+                         <h3 className="text-lg font-bold flex items-center mb-2 relative z-10 text-transparent bg-clip-text bg-gradient-to-r from-white to-purple-200"><Palette className="w-5 h-5 mr-2 text-purple-400" />大师创意模式 <span className="text-[10px] ml-2 text-purple-400/60 font-mono border border-purple-500/30 px-1 rounded">PRO</span></h3>
+                         <p className="text-slate-400 text-xs mb-3 relative z-10">输入想法，或<span className="font-bold text-purple-300 mx-1">留空</span>点击生成，AI 将智能构思贴合产品的场景。</p>
+                         <div className="relative z-10 space-y-3">
+                             <input type="text" value={customPrompt} onChange={(e) => setCustomPrompt(e.target.value)} placeholder="留空，AI 智能构思独特场景..." className="w-full px-4 py-2.5 bg-black/40 border border-purple-500/30 rounded-lg text-white placeholder-slate-600 focus:bg-black/60 focus:outline-none focus:ring-2 focus:ring-purple-500/50 text-sm backdrop-blur-sm transition-all" />
+                             <button 
+                                onClick={isCustomGenerating ? handleStop : handleCustomGenerate} 
+                                disabled={!mainImage || (isImagenModel && !!mainImage)} 
+                                className={`w-full py-2.5 rounded-lg font-bold text-sm transition-all flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed group border border-white/10 ${isCustomGenerating ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-[0_0_15px_rgba(192,38,211,0.3)] hover:shadow-[0_0_25px_rgba(192,38,211,0.5)]'}`}
+                             >
+                                 {isCustomGenerating ? (
+                                    <><Square className="w-4 h-4 mr-2 fill-current" /> 停止生成</>
+                                 ) : (
+                                    customPrompt.trim() ? <><MessageSquarePlus className="w-4 h-4 mr-2" />生成创意</> : <><Shuffle className="w-4 h-4 mr-2 group-hover:rotate-180 transition-transform" />大师级构思</>
+                                 )}
+                             </button>
+                         </div>
+                    </div>
+                </div>
+
+                {/* Image to Prompt Card */}
+                <div className="bg-slate-900/40 backdrop-blur-md rounded-2xl border border-teal-500/20 p-6 space-y-4 shadow-lg relative overflow-hidden">
+                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-teal-500 to-transparent opacity-50"></div>
+                    <h3 className="text-lg font-bold flex items-center text-teal-300">
+                        <BrainCircuit className="w-5 h-5 mr-2" />
+                        智能垫图 (Image-to-Prompt)
+                    </h3>
+                    <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-2">1. 上传风格参考图</label>
+                        <div className={`relative border-2 border-dashed rounded-xl p-4 text-center transition-all duration-300 overflow-hidden ${reversePromptImage ? 'border-teal-500/50 bg-teal-950/20' : 'border-slate-700 hover:border-teal-500/50 hover:bg-slate-800/50'}`}>
+                            <input type="file" ref={reverseFileInputRef} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" onChange={handleReverseImageUpload} accept="image/*" />
+                            {reversePromptImage ? (
+                                <div className="relative group">
+                                    <img src={reversePromptImage} alt="Reference for prompt" className="w-full h-32 object-contain rounded-lg shadow-sm mx-auto" />
+                                    <button onClick={removeReverseImage} className="absolute top-1 right-1 p-1 bg-slate-900/80 rounded-full text-red-400 border border-red-500/30 z-20 pointer-events-auto transition-transform hover:scale-110"><Trash2 className="w-3 h-3" /></button>
+                                </div>
+                            ) : (
+                                <div className="space-y-2 py-4 pointer-events-none">
+                                    <div className="w-10 h-10 bg-teal-950/50 border border-teal-500/30 text-teal-400 rounded-full flex items-center justify-center mx-auto shadow-[0_0_10px_rgba(20,184,166,0.2)]"><ImageIcon className="w-5 h-5" /></div>
+                                    <div><p className="text-slate-400 font-medium text-sm">点击上传参考图</p></div>
+                                </div>
+                            )}
                         </div>
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-2">2. AI 反推提示词</label>
                         <button
-                            onClick={handleSingleGenerate}
-                            disabled={!mainImage || (isImagenModel && !!mainImage) || isGenerating}
-                            className="bg-indigo-600/20 hover:bg-indigo-600 border border-indigo-500/50 hover:border-indigo-500 text-indigo-300 hover:text-white px-4 py-2 rounded-lg font-bold text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+                            onClick={handleAnalyzeForPrompt}
+                            disabled={!reversePromptImage || isAnalyzingForPrompt}
+                            className="w-full py-2 px-3 bg-teal-950/30 hover:bg-teal-900/50 text-teal-300 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center border border-teal-500/30 hover:border-teal-400/50 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                            <Play className="w-4 h-4 mr-1" /> 生成
+                            {isAnalyzingForPrompt ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <Wand2 className="w-3 h-3 mr-2" />}
+                            {isAnalyzingForPrompt ? "正在解码视觉信息..." : "分析图片 & 生成提示词"}
+                        </button>
+                        <textarea
+                            rows={4}
+                            value={generatedReversePrompt}
+                            onChange={(e) => setGeneratedReversePrompt(e.target.value)}
+                            placeholder="AI 将在此处生成可编辑的提示词..."
+                            className="mt-2 w-full px-4 py-2.5 bg-black/30 border border-slate-700 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm resize-none text-slate-300 placeholder-slate-600 font-mono"
+                            disabled={isAnalyzingForPrompt}
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-2">3. 生成新图片</label>
+                        <button
+                            onClick={handleGenerateFromPrompt}
+                            disabled={!generatedReversePrompt || isGeneratingFromPrompt}
+                            className="w-full py-2.5 bg-gradient-to-r from-teal-600 to-emerald-600 text-white rounded-lg font-bold text-sm shadow-[0_0_15px_rgba(13,148,136,0.3)] hover:shadow-[0_0_25px_rgba(13,148,136,0.5)] transition-all flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed border border-white/10"
+                        >
+                            {isGeneratingFromPrompt ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
+                            {isGeneratingFromPrompt ? "生成中..." : "开始文生图"}
                         </button>
                     </div>
                 </div>
-            </div>
 
+                <div className="bg-slate-900/40 backdrop-blur-md rounded-2xl border border-white/5 p-6 shadow-lg">
+                    <h3 className="text-sm font-bold text-slate-300 mb-3 flex items-center"><Layers className="w-4 h-4 mr-2 text-indigo-400" />批量智能视图 (10经典 + 2智能)</h3>
+                    
+                    <button 
+                      onClick={isGenerating ? handleStop : openEditModal} 
+                      disabled={!mainImage || (isImagenModel && !!mainImage)} 
+                      className={`w-full py-3 px-4 rounded-xl font-bold text-white shadow-lg transition-all transform active:scale-[0.98] mb-4 ${
+                        !mainImage || (isImagenModel && !!mainImage) 
+                          ? 'bg-slate-800 text-slate-500 cursor-not-allowed shadow-none border border-slate-700' 
+                          : isGenerating 
+                            ? 'bg-red-600 hover:bg-red-700' 
+                            : 'bg-gradient-to-r from-indigo-600 to-blue-600 hover:shadow-[0_0_20px_rgba(79,70,229,0.4)] border border-indigo-400/30'
+                      } flex items-center justify-center text-sm`}
+                    >
+                      {isGenerating ? <><Square className="w-4 h-4 mr-2 fill-current" /> 停止生成 (Stop)</> : <><Sparkles className="w-4 h-4 mr-2" />一键批量生成 (Batch Gen)</>}
+                    </button>
+
+                    <div className="pt-3 border-t border-white/5">
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-2">单视角生成 (Single Shot)</label>
+                        <div className="flex gap-2">
+                            <div className="relative flex-1">
+                                <select
+                                    value={selectedSingleAngleId}
+                                    onChange={(e) => setSelectedSingleAngleId(Number(e.target.value))}
+                                    disabled={!mainImage || (isImagenModel && !!mainImage) || isGenerating}
+                                    className="w-full bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-slate-200 px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500 appearance-none disabled:opacity-50"
+                                >
+                                    {staticAngles.map(angle => (
+                                        <option key={angle.id} value={angle.id}>{angle.name}</option>
+                                    ))}
+                                </select>
+                                <ChevronDown className="absolute right-3 top-2.5 w-4 h-4 text-slate-500 pointer-events-none" />
+                            </div>
+                            <button
+                                onClick={handleSingleGenerate}
+                                disabled={!mainImage || (isImagenModel && !!mainImage) || isGenerating}
+                                className="bg-indigo-600/20 hover:bg-indigo-600 border border-indigo-500/50 hover:border-indigo-500 text-indigo-300 hover:text-white px-4 py-2 rounded-lg font-bold text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+                            >
+                                <Play className="w-4 h-4 mr-1" /> 生成
+                            </button>
+                        </div>
+                    </div>
+                </div>
+              </>
+            ) : (
+              /* Pro Studio Mode UI based on screenshot */
+              <div className="bg-slate-900/40 backdrop-blur-md rounded-2xl border border-white/5 p-6 shadow-xl space-y-6 animate-in fade-in slide-in-from-right-4 duration-300 relative overflow-hidden">
+                <div className="absolute top-0 right-0 p-2">
+                  <div className="flex items-center bg-indigo-500/20 border border-indigo-500/30 rounded-full px-2 py-0.5 text-[10px] font-bold text-indigo-300 animate-pulse">
+                    <ShieldCheck className="w-3 h-3 mr-1" /> 严格参考逻辑 (Strict Logic)
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-slate-400 mb-2">品类选择</label>
+                  <div className="relative">
+                    <select 
+                      value={category} 
+                      onChange={(e) => setCategory(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-slate-200 outline-none focus:ring-2 focus:ring-indigo-500 appearance-none"
+                    >
+                      <option value="四件套">四件套</option>
+                      <option value="枕头">枕头</option>
+                      <option value="被芯">被芯</option>
+                      <option value="床垫">床垫</option>
+                      <option value="家居服">家居服</option>
+                      <option value="夏被">夏被</option>
+                      <option value="凉席">凉席</option>
+                      <option value="床裙款凉席">床裙款凉席</option>
+                      <option value="毛毯">毛毯</option>
+                      <option value="床笠">床笠</option>
+                      <option value="床盖">床盖</option>
+                    </select>
+                    <ChevronDown className="absolute right-4 top-4 w-5 h-5 text-slate-500 pointer-events-none" />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-bold text-slate-400 mb-2">参考图片</label>
+                  <div className="flex gap-4 items-start">
+                    <div className="w-32 h-32 bg-slate-800 border border-slate-700 rounded-xl overflow-hidden relative group">
+                      {mainImage ? (
+                        <img src={mainImage} alt="Main" className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-slate-600">
+                          <ImageIcon className="w-8 h-8" />
+                        </div>
+                      )}
+                      <input type="file" onChange={handleImageUpload} className="absolute inset-0 opacity-0 cursor-pointer" accept="image/*" />
+                    </div>
+                    <div className="flex-1 space-y-2">
+                      <div className="bg-slate-800/50 border border-slate-700 rounded-lg px-4 py-2 text-slate-200 font-bold">实拍图</div>
+                      <p className="text-xs text-slate-500 leading-relaxed">上传真实产品照片<br/>优先还原材质与花型</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-bold text-slate-400 mb-2">模特设置</label>
+                  <div className="relative">
+                    <select 
+                      value={modelAssetType} 
+                      onChange={(e) => setModelAssetType(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-slate-200 outline-none focus:ring-2 focus:ring-indigo-500 appearance-none"
+                    >
+                      <option value="">选择模特素材</option>
+                      <option value="asian_female">亚洲女性</option>
+                      <option value="asian_male">亚洲男性</option>
+                      <option value="western_female">欧美女性</option>
+                      <option value="western_male">欧美男性</option>
+                      <option value="child">儿童</option>
+                      <option value="ref_model">使用参考图中的模特</option>
+                      <option value="no_model">无模特</option>
+                    </select>
+                    <ChevronDown className="absolute right-4 top-4 w-5 h-5 text-slate-500 pointer-events-none" />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between mb-4 bg-slate-800/50 p-3 rounded-xl border border-slate-700/50">
+                  <div className="flex items-center gap-2">
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${isVectorMode ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/20' : 'bg-slate-700 text-slate-400'}`}>
+                      <Palette className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-slate-200">精准构图模式 (Vector Guidance)</div>
+                      <div className="text-[10px] text-slate-500">将实拍图转为矢量线稿以锁定镜头语言，生成实拍效果</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {compositionImages.length > 0 && (
+                      <button
+                        onClick={handleVectorizeCompositions}
+                        disabled={isVectorizing}
+                        className="text-[10px] bg-slate-700 hover:bg-slate-600 text-slate-200 px-2 py-1 rounded-md transition-all flex items-center gap-1 disabled:opacity-50 border border-slate-600/50"
+                      >
+                        {isVectorizing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                        识别并转换
+                      </button>
+                    )}
+                    <button 
+                      onClick={() => setIsVectorMode(!isVectorMode)}
+                      className={`w-10 h-5 rounded-full transition-all relative ${isVectorMode ? 'bg-indigo-500' : 'bg-slate-700'}`}
+                    >
+                      <div className={`absolute top-1 w-3 h-3 rounded-full bg-white transition-all shadow-sm ${isVectorMode ? 'right-1' : 'left-1'}`} />
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-bold text-slate-400 mb-2">素材选择</label>
+                  <div className={`grid ${ modelAssetType ? 'grid-cols-2' : 'grid-cols-3'} gap-3 mb-4`}>
+                    {[
+                      { label: '模特', state: modelImage, setState: setModelImage, ref: modelInputRef, required: false, id: 'model', multiple: false },
+                      { label: '场景', state: sceneImage, setState: setSceneImage, ref: sceneInputRef, required: false, id: 'scene', multiple: false },
+                      { label: '构图', state: compositionImages, setState: setCompositionImages, ref: compositionInputRef, required: false, id: 'composition', multiple: true },
+                    ].filter(item => item.id !== 'model' || !modelAssetType).map((item, idx) => (
+                      <div 
+                        key={item.id} 
+                        onClick={() => item.ref.current?.click()}
+                        className={`aspect-square bg-slate-800 border-2 border-dashed rounded-xl flex flex-col items-center justify-center cursor-pointer transition-all relative overflow-hidden ${
+                          (Array.isArray(item.state) ? item.state.length > 0 : !!item.state) 
+                            ? 'border-indigo-500/50 bg-indigo-950/20' 
+                            : 'border-slate-700 hover:border-indigo-500/50'
+                        }`}
+                      >
+                        <input 
+                          type="file" 
+                          ref={item.ref} 
+                          className="hidden" 
+                          accept="image/*" 
+                          multiple={item.multiple}
+                          onChange={(e) => {
+                            const files = e.target.files;
+                            if (files && files.length > 0) {
+                              if (item.multiple) {
+                                const newImages: string[] = [];
+                                Array.from(files).forEach((file: File) => {
+                                  const reader = new FileReader();
+                                  reader.onloadend = () => {
+                                    newImages.push(reader.result as string);
+                                    if (newImages.length === files.length) {
+                                      item.setState(newImages);
+                                    }
+                                  };
+                                  reader.readAsDataURL(file);
+                                });
+                              } else {
+                                const file = files[0];
+                                const reader = new FileReader();
+                                reader.onloadend = () => item.setState(reader.result as string);
+                                reader.readAsDataURL(file);
+                              }
+                            }
+                          }}
+                        />
+                        {(Array.isArray(item.state) ? item.state.length > 0 : !!item.state) ? (
+                          <div className="relative w-full h-full group">
+                            {item.multiple && Array.isArray(item.state) && item.state.length > 1 ? (
+                              <div className="grid grid-cols-2 gap-0.5 h-full w-full overflow-y-auto p-0.5 bg-slate-900/50 scrollbar-hide">
+                                {item.state.map((img, i) => (
+                                  <div key={i} className="relative aspect-square rounded-sm overflow-hidden border border-white/5">
+                                    <img src={img} className="w-full h-full object-cover" />
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <img 
+                                src={Array.isArray(item.state) ? item.state[0] : (item.state as string)} 
+                                alt={item.label} 
+                                className="w-full h-full object-cover" 
+                              />
+                            )}
+                            
+                            <button 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                item.setState(Array.isArray(item.state) ? [] : null);
+                              }}
+                              className="absolute top-1 right-1 p-1 bg-red-500/80 rounded-full text-white hover:bg-red-600 transition-colors z-10 shadow-lg"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+
+                            {item.multiple && Array.isArray(item.state) && item.state.length > 1 && (
+                              <div className="absolute bottom-1 left-1 px-1.5 py-0.5 bg-indigo-600/90 rounded text-[8px] font-bold text-white z-10 shadow-sm pointer-events-none flex items-center gap-1">
+                                {isVectorMode && <Palette className="w-2 h-2" />}
+                                {item.state.length} 张构图
+                              </div>
+                            )}
+                            {!item.multiple && isVectorMode && (
+                              <div className="absolute bottom-1 left-1 px-1.5 py-0.5 bg-indigo-600/90 rounded text-[8px] font-bold text-white z-10 shadow-sm pointer-events-none flex items-center gap-1">
+                                <Palette className="w-2 h-2" />
+                                矢量模式
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <>
+                            <div className="relative">
+                              <ImageIcon className="w-6 h-6 text-slate-500 mb-1" />
+                              {item.required && <span className="absolute -top-1 -right-1 text-red-500 text-xs">*</span>}
+                            </div>
+                            <span className="text-[10px] text-slate-400">{item.label}</span>
+                            {item.multiple && <span className="text-[8px] text-slate-500 mt-0.5">(支持多选)</span>}
+                          </>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4">
+                    <div className="flex justify-between items-center mb-3">
+                      <label className="flex items-center text-xs font-bold text-slate-400 uppercase tracking-wider">
+                        <Monitor className="w-3.5 h-3.5 mr-1.5 text-indigo-400" />
+                        构图权重 (Composition Weight)
+                      </label>
+                      <span className="text-xs font-mono font-bold text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded border border-indigo-500/20">{compositionWeight}</span>
+                    </div>
+                    <input 
+                      type="range" 
+                      min="0" 
+                      max="10" 
+                      step="1" 
+                      value={compositionWeight} 
+                      onChange={(e) => setCompositionWeight(Number(e.target.value))}
+                      className={`w-full h-1.5 rounded-lg appearance-none cursor-pointer transition-all ${compositionWeight === 10 ? 'bg-indigo-500/50 accent-indigo-400 shadow-[0_0_10px_rgba(99,102,241,0.3)]' : 'bg-slate-700 accent-indigo-500'}`}
+                    />
+                    <div className="flex justify-between mt-2 text-[10px] text-slate-500 font-bold uppercase tracking-tighter">
+                      <span>自由发挥 (Creative)</span>
+                      <span className={compositionWeight === 10 ? "text-indigo-400" : ""}>
+                        {compositionWeight === 10 ? "极度严格 (Ultra-Strict)" : "严格遵循 (Strict)"}
+                      </span>
+                    </div>
+                    {compositionWeight === 10 && (
+                      <p className="mt-2 text-[9px] text-indigo-400/70 leading-tight font-medium">
+                        * 极度严格模式：产品材质与花型将严格映射至构图遮罩区域，不做任何AI发挥。
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-bold text-slate-400 mb-2">图片比例</label>
+                    <div className="relative">
+                      <select value={aspectRatio} onChange={(e) => setAspectRatio(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 outline-none appearance-none">
+                        <option value="1:1">1:1</option>
+                        <option value="4:3">4:3</option>
+                        <option value="3:4">3:4</option>
+                        <option value="16:9">16:9</option>
+                        <option value="9:16">9:16</option>
+                      </select>
+                      <ChevronDown className="absolute right-3 top-3 w-4 h-4 text-slate-500 pointer-events-none" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-slate-400 mb-2">分辨率</label>
+                    <div className="relative">
+                      <select value={imageResolution} onChange={(e) => setImageResolution(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 outline-none appearance-none">
+                        <option value="1K">1K</option>
+                        <option value="2K">2K</option>
+                        <option value="4K">4K</option>
+                      </select>
+                      <ChevronDown className="absolute right-3 top-3 w-4 h-4 text-slate-500 pointer-events-none" />
+                    </div>
+                  </div>
+                </div>
+
+                <button 
+                  onClick={isGeneratingPro ? handleStop : handleProGenerate}
+                  className={`w-full py-4 rounded-xl font-bold text-lg transition-all shadow-xl flex items-center justify-center ${isGeneratingPro ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-white text-slate-950 hover:bg-slate-100'}`}
+                >
+                  {isGeneratingPro ? (
+                    <><Square className="w-5 h-5 mr-3 fill-current" /> 停止生成</>
+                  ) : (
+                    "立即生成"
+                  )}
+                </button>
+              </div>
+            )}
+            
             {/* Model Service Settings */}
             <div className="bg-slate-900/40 backdrop-blur-md rounded-2xl border border-white/5 overflow-hidden shadow-lg">
                 <button 
@@ -1486,7 +1891,6 @@ const AIProductStudio = ({ onRequireKey }: Props = {}) => {
               <div className="bg-slate-900/20 border-2 border-dashed border-slate-800 rounded-2xl h-[500px] flex flex-col items-center justify-center text-center p-8 backdrop-blur-sm">
                 <div className="w-20 h-20 bg-slate-800/50 rounded-full flex items-center justify-center mb-4 animate-pulse shadow-[0_0_20px_rgba(255,255,255,0.05)]"><ImagePlus className="w-10 h-10 text-slate-600" /></div>
                 <h3 className="text-lg font-medium text-slate-300">等待生成任务</h3>
-                <p className="text-slate-500 mt-2 max-w-sm text-sm">您可以选择批量生成 12 种视图（包含 AI 智能分析出的独特视角），或者使用自定义模块生成创意场景。</p>
               </div>
             )}
 
@@ -1505,7 +1909,15 @@ const AIProductStudio = ({ onRequireKey }: Props = {}) => {
                     {result.status === 'completed' && result.imageUrl && (
                       <img src={result.imageUrl} alt={result.name} className="w-full h-full object-cover transition-transform duration-700 hover:scale-105 cursor-pointer" onClick={() => setPreviewImage(result.imageUrl)} />
                     )}
-                    <div className="absolute top-2 left-2 z-10"><span className={`backdrop-blur-md text-white text-[10px] px-2 py-0.5 rounded font-medium shadow-sm border border-white/10 ${result.type === 'Image-to-Prompt' ? 'bg-teal-600/60' : (result.isDynamic || result.type.includes('Custom') ? 'bg-indigo-600/60' : 'bg-black/60')}`}>{result.type}</span></div>
+                    <div className="absolute top-2 left-2 z-10 flex gap-1">
+                      <span className={`backdrop-blur-md text-white text-[10px] px-2 py-0.5 rounded font-medium shadow-sm border border-white/10 ${result.type === 'Image-to-Prompt' ? 'bg-teal-600/60' : (result.isDynamic || result.type.includes('Custom') ? 'bg-indigo-600/60' : 'bg-black/60')}`}>{result.type}</span>
+                      {result.isVector && (
+                        <span className="backdrop-blur-md bg-indigo-600/60 text-white text-[10px] px-2 py-0.5 rounded font-medium shadow-sm border border-white/10 flex items-center gap-1">
+                          <Palette className="w-3 h-3" />
+                          精准构图
+                        </span>
+                      )}
+                    </div>
                     
                     {result.status === 'completed' && (
                       <div className="absolute inset-0 bg-slate-900/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center space-x-2 backdrop-blur-[2px] pointer-events-none">

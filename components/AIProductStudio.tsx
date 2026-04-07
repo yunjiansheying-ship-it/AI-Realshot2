@@ -1547,7 +1547,6 @@ const AIProductStudio = ({ onRequireKey }: Props = {}) => {
                     </div>
                     <div>
                       <div className="text-xs font-bold text-slate-200">精准构图模式 (Vector Guidance)</div>
-                      <div className="text-[10px] text-slate-500">将实拍图转为矢量线稿以锁定镜头语言，生成实拍效果</div>
                     </div>
                   </div>
                   <div className="flex items-center gap-3">

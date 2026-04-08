@@ -662,12 +662,13 @@ const AIProductStudio = ({ onRequireKey }: Props = {}) => {
     if (!signal.aborted) setIsGeneratingPro(false);
   };
 
-  const handleVectorizeCompositions = async () => {
-    if (compositionImages.length === 0) return;
+  const handleVectorizeCompositions = async (imagesToProcess?: string[]) => {
+    const images = imagesToProcess || compositionImages;
+    if (images.length === 0) return;
     setIsVectorizing(true);
     try {
       const vectorized = await Promise.all(
-        compositionImages.map(img => vectorizeImage(img, getServiceConfig()))
+        images.map(img => vectorizeImage(img, getServiceConfig()))
       );
       const validVectorized = vectorized.filter((img): img is string => img !== null);
       if (validVectorized.length > 0) {
@@ -1348,8 +1349,7 @@ const AIProductStudio = ({ onRequireKey }: Props = {}) => {
                 <div id="creative-mode-section" className="relative group rounded-2xl p-[1px] bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 shadow-lg shadow-purple-500/20">
                     <div className="bg-slate-900 rounded-2xl p-5 relative overflow-hidden">
                          <div className="absolute top-0 right-0 -mr-8 -mt-8 w-32 h-32 bg-purple-500 opacity-20 rounded-full blur-3xl pointer-events-none"></div>
-                         <h3 className="text-lg font-bold flex items-center mb-2 relative z-10 text-transparent bg-clip-text bg-gradient-to-r from-white to-purple-200"><Palette className="w-5 h-5 mr-2 text-purple-400" />大师创意模式 <span className="text-[10px] ml-2 text-purple-400/60 font-mono border border-purple-500/30 px-1 rounded">PRO</span></h3>
-                         <p className="text-slate-400 text-xs mb-3 relative z-10">输入想法，或<span className="font-bold text-purple-300 mx-1">留空</span>点击生成，AI 将智能构思贴合产品的场景。</p>
+                         <h3 className="text-lg font-bold flex items-center mb-4 relative z-10 text-transparent bg-clip-text bg-gradient-to-r from-white to-purple-200"><Palette className="w-5 h-5 mr-2 text-purple-400" />大师创意模式 <span className="text-[10px] ml-2 text-purple-400/60 font-mono border border-purple-500/30 px-1 rounded">PRO</span></h3>
                          <div className="relative z-10 space-y-3">
                              <input type="text" value={customPrompt} onChange={(e) => setCustomPrompt(e.target.value)} placeholder="留空，AI 智能构思独特场景..." className="w-full px-4 py-2.5 bg-black/40 border border-purple-500/30 rounded-lg text-white placeholder-slate-600 focus:bg-black/60 focus:outline-none focus:ring-2 focus:ring-purple-500/50 text-sm backdrop-blur-sm transition-all" />
                              <button 
@@ -1550,18 +1550,15 @@ const AIProductStudio = ({ onRequireKey }: Props = {}) => {
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
-                    {compositionImages.length > 0 && (
-                      <button
-                        onClick={handleVectorizeCompositions}
-                        disabled={isVectorizing}
-                        className="text-[10px] bg-slate-700 hover:bg-slate-600 text-slate-200 px-2 py-1 rounded-md transition-all flex items-center gap-1 disabled:opacity-50 border border-slate-600/50"
-                      >
-                        {isVectorizing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-                        识别并转换
-                      </button>
-                    )}
+                    {isVectorizing && <Loader2 className="w-3 h-3 animate-spin text-indigo-400" />}
                     <button 
-                      onClick={() => setIsVectorMode(!isVectorMode)}
+                      onClick={() => {
+                        const nextMode = !isVectorMode;
+                        setIsVectorMode(nextMode);
+                        if (nextMode && compositionImages.length > 0) {
+                          handleVectorizeCompositions();
+                        }
+                      }}
                       className={`w-10 h-5 rounded-full transition-all relative ${isVectorMode ? 'bg-indigo-500' : 'bg-slate-700'}`}
                     >
                       <div className={`absolute top-1 w-3 h-3 rounded-full bg-white transition-all shadow-sm ${isVectorMode ? 'right-1' : 'left-1'}`} />
@@ -1603,6 +1600,9 @@ const AIProductStudio = ({ onRequireKey }: Props = {}) => {
                                     newImages.push(reader.result as string);
                                     if (newImages.length === files.length) {
                                       item.setState(newImages);
+                                      if (item.id === 'composition' && isVectorMode) {
+                                        handleVectorizeCompositions(newImages);
+                                      }
                                     }
                                   };
                                   reader.readAsDataURL(file);
@@ -1645,15 +1645,8 @@ const AIProductStudio = ({ onRequireKey }: Props = {}) => {
                             </button>
 
                             {item.multiple && Array.isArray(item.state) && item.state.length > 1 && (
-                              <div className="absolute bottom-1 left-1 px-1.5 py-0.5 bg-indigo-600/90 rounded text-[8px] font-bold text-white z-10 shadow-sm pointer-events-none flex items-center gap-1">
-                                {isVectorMode && <Palette className="w-2 h-2" />}
+                              <div className="absolute bottom-1 left-1 px-1.5 py-0.5 bg-indigo-600/90 rounded text-[8px] font-bold text-white z-10 shadow-sm pointer-events-none">
                                 {item.state.length} 张构图
-                              </div>
-                            )}
-                            {!item.multiple && isVectorMode && (
-                              <div className="absolute bottom-1 left-1 px-1.5 py-0.5 bg-indigo-600/90 rounded text-[8px] font-bold text-white z-10 shadow-sm pointer-events-none flex items-center gap-1">
-                                <Palette className="w-2 h-2" />
-                                矢量模式
                               </div>
                             )}
                           </div>
@@ -1694,11 +1687,6 @@ const AIProductStudio = ({ onRequireKey }: Props = {}) => {
                         {compositionWeight === 10 ? "极度严格 (Ultra-Strict)" : "严格遵循 (Strict)"}
                       </span>
                     </div>
-                    {compositionWeight === 10 && (
-                      <p className="mt-2 text-[9px] text-indigo-400/70 leading-tight font-medium">
-                        * 极度严格模式：产品材质与花型将严格映射至构图遮罩区域，不做任何AI发挥。
-                      </p>
-                    )}
                   </div>
                 </div>
 
@@ -1908,15 +1896,6 @@ const AIProductStudio = ({ onRequireKey }: Props = {}) => {
                     {result.status === 'completed' && result.imageUrl && (
                       <img src={result.imageUrl} alt={result.name} className="w-full h-full object-cover transition-transform duration-700 hover:scale-105 cursor-pointer" onClick={() => setPreviewImage(result.imageUrl)} />
                     )}
-                    <div className="absolute top-2 left-2 z-10 flex gap-1">
-                      <span className={`backdrop-blur-md text-white text-[10px] px-2 py-0.5 rounded font-medium shadow-sm border border-white/10 ${result.type === 'Image-to-Prompt' ? 'bg-teal-600/60' : (result.isDynamic || result.type.includes('Custom') ? 'bg-indigo-600/60' : 'bg-black/60')}`}>{result.type}</span>
-                      {result.isVector && (
-                        <span className="backdrop-blur-md bg-indigo-600/60 text-white text-[10px] px-2 py-0.5 rounded font-medium shadow-sm border border-white/10 flex items-center gap-1">
-                          <Palette className="w-3 h-3" />
-                          精准构图
-                        </span>
-                      )}
-                    </div>
                     
                     {result.status === 'completed' && (
                       <div className="absolute inset-0 bg-slate-900/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center space-x-2 backdrop-blur-[2px] pointer-events-none">
@@ -1928,21 +1907,7 @@ const AIProductStudio = ({ onRequireKey }: Props = {}) => {
                     )}
                   </div>
 
-                  <div className="p-4 flex-1 flex flex-col justify-between">
-                    <div>
-                      <div className="flex justify-between items-start mb-1">
-                          <h4 className="font-semibold text-slate-200 text-sm truncate pr-2" title={result.name}>{result.name}</h4>
-                          {result.status === 'completed' && <span className="text-[10px] text-green-300 bg-green-900/30 px-1.5 py-0.5 rounded border border-green-500/30 font-medium flex items-center flex-shrink-0"><Check className="w-3 h-3 mr-1" /> OK</span>}
-                      </div>
-                      {result.description_cn && <p className="text-xs text-slate-400 mb-2 leading-relaxed">{result.description_cn}</p>}
-                    </div>
-                    <div className="mt-auto relative group/prompt pt-2 border-t border-white/5">
-                      <p className="text-[10px] text-slate-500 line-clamp-2 leading-relaxed cursor-help hover:text-slate-300 transition-colors" title={result.finalPrompt}>
-                          <span className="font-semibold text-slate-400">Prompt:</span> {result.finalPrompt}
-                      </p>
-                      <button onClick={() => copyPrompt(result.finalPrompt, result.id)} className="absolute right-0 top-1.5 p-1 bg-slate-800 border border-slate-700 rounded text-slate-400 hover:text-indigo-400 opacity-0 group-hover/prompt:opacity-100 transition-opacity">{copiedId === result.id ? <Check className="w-3 h-3 text-green-400" /> : <Copy className="w-3 h-3" />}</button>
-                    </div>
-                  </div>
+                  {/* Card Footer Removed for Cleanliness */}
                 </div>
               ))}
             </div>

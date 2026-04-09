@@ -437,6 +437,50 @@ export const getDynamicAnglePrompts = async (imageBase64: string, existingAngles
     return dynamicPrompts.slice(0, 2);
 }
 
+export const cleanSceneImage = async (imageBase64: string, config: ServiceConfig): Promise<string | null> => {
+  const ai = getAiClient();
+  const mimeType = getMimeType(imageBase64);
+  const data = imageBase64.split(',')[1];
+  
+  const promptText = `
+    TASK: Clean this bedroom scene image for product photography reference.
+    
+    STRICT REQUIREMENTS:
+    1. IDENTIFY: Find any home textile bedding (quilts, pillows, bed sheets) currently on the bed.
+    2. REMOVE & REPLACE: Remove the identified bedding and replace it SEAMLESSLY with a clean, flat WHITE MATTRESS on the bed frame.
+    3. PRESERVE: Keep all other bedroom environment details, furniture, props, lighting, and camera perspective EXACTLY as they are.
+    4. QUALITY: The final output must be a photorealistic image where the bed looks ready for new products to be placed on it.
+    
+    OUTPUT: A high-quality photorealistic bedroom scene with a bare bed and a white mattress.
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: config.imageModel,
+      contents: {
+        parts: [
+          { text: promptText },
+          { inlineData: { mimeType, data } }
+        ]
+      },
+      config: {
+        imageConfig: {
+          aspectRatio: "1:1"
+        }
+      }
+    });
+
+    for (const part of response.candidates?.[0]?.content?.parts || []) {
+      if (part.inlineData) {
+        return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+      }
+    }
+  } catch (e) {
+    console.error("Scene cleaning failed:", e);
+  }
+  return null;
+};
+
 export const vectorizeImage = async (imageBase64: string, config: ServiceConfig): Promise<string | null> => {
   const ai = getAiClient();
   const mimeType = getMimeType(imageBase64);
@@ -447,13 +491,14 @@ export const vectorizeImage = async (imageBase64: string, config: ServiceConfig)
     
     STRICT REQUIREMENTS:
     1. BACKGROUND: Pure white background.
-    2. LINES: Use clean, equal-thickness black lines for all outlines.
+    2. CONTOUR PERSPECTIVE: Use clean, equal-thickness black lines to define the EXACT outline and perspective of the main product.
     3. SIMPLIFICATION: Remove all textures, shadows, gradients, and complex details.
-    4. SUBJECTS: If there are people, simplify them into clean line outlines.
-    5. FOCUS: Maintain the EXACT perspective, layout, and bedding (quilt, pillows) folds from the original image.
-    6. COLORING: ONLY fill the bedding (quilt and pillows) with flat, solid colors (e.g., light blue or grey) to highlight them as the focal point. The rest of the image must remain black and white line art.
+    4. EXCLUSION: REMOVE and IGNORE all background props, furniture (except the bed frame), and decorative elements. The output should ONLY contain the main product (bedding) and its immediate structural context.
+    5. LAYOUT & STACKING: Maintain the EXACT layout and bedding (quilt, pillows) stacking/folding method from the original image. This is critical for composition consistency.
+    6. SUBJECTS: If there are people, simplify them into clean line outlines or remove if they obscure the bedding stacking.
+    7. COLORING: ONLY fill the bedding (quilt and pillows) with flat, solid colors (e.g., light blue or grey) to highlight the stacking structure and layout. The rest of the image must remain black and white line art.
     
-    OUTPUT: A high-quality minimalist vector illustration that mirrors the original composition perfectly.
+    OUTPUT: A high-quality minimalist vector illustration that mirrors the original bedding composition, contour perspective, and stacking method perfectly.
   `;
 
   try {

@@ -18,7 +18,8 @@ import {
   getPromptFromImage,
   getBedroomSceneSuggestions,
   BedroomScene,
-  vectorizeImage
+  vectorizeImage,
+  cleanSceneImage
 } from '../services/geminiService';
 import GenerationLoader from './GenerationLoader';
 
@@ -63,6 +64,7 @@ const AIProductStudio = ({ onRequireKey }: Props = {}) => {
   const [compositionWeight, setCompositionWeight] = useState(10);
   const [isVectorMode, setIsVectorMode] = useState(false);
   const [isVectorizing, setIsVectorizing] = useState(false);
+  const [isCleaningScene, setIsCleaningScene] = useState(false);
   const [isGeneratingPro, setIsGeneratingPro] = useState(false);
 
   const modelInputRef = useRef<HTMLInputElement>(null);
@@ -122,6 +124,19 @@ const AIProductStudio = ({ onRequireKey }: Props = {}) => {
   // Project Management State
   const [savedProjects, setSavedProjects] = useState<SavedProject[]>([]);
   const [isProjectManagerOpen, setIsProjectManagerOpen] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<{
+    type: 'load' | 'delete';
+    id?: string;
+    project?: SavedProject;
+  } | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
 
   // Single Angle Selection State
   const [selectedSingleAngleId, setSelectedSingleAngleId] = useState<number>(staticAngles[0].id);
@@ -151,7 +166,7 @@ const AIProductStudio = ({ onRequireKey }: Props = {}) => {
 
   const handleSaveProject = () => {
     if (!mainImage && !productName) {
-      alert('请至少上传一张图片或输入描述后再保存。');
+      setToast({ message: '请至少上传一张图片或输入描述后再保存。', type: 'info' });
       return;
     }
 
@@ -172,33 +187,39 @@ const AIProductStudio = ({ onRequireKey }: Props = {}) => {
     try {
       safeLocalStorage.setItem('ai_studio_projects', JSON.stringify(updatedProjects));
       setSavedProjects(updatedProjects);
-      alert('项目保存成功！');
+      setToast({ message: '项目保存成功！', type: 'success' });
     } catch (e) {
       // LocalStorage quota exceeded usually
-      alert('存储空间不足！无法保存更多项目。请删除旧项目后重试。');
+      setToast({ message: '存储空间不足！无法保存更多项目。请删除旧项目后重试。', type: 'error' });
       console.error("Save failed", e);
     }
   };
 
   const handleLoadProject = (project: SavedProject) => {
-    if (window.confirm('加载项目将覆盖当前工作区的所有内容。确定继续吗？')) {
-      setMainImage(project.mainImage);
-      setProductName(project.productName);
-      setProductMaterial(project.productMaterial || '');
-      setLightingSuggestion(project.lightingSuggestion);
-      setGeneratedResults(project.generatedResults);
-      setCustomPrompt(project.customPrompt || '');
-      setIsProjectManagerOpen(false);
-    }
+    setConfirmAction({ type: 'load', project });
+  };
+
+  const executeLoadProject = (project: SavedProject) => {
+    setMainImage(project.mainImage);
+    setProductName(project.productName);
+    setProductMaterial(project.productMaterial || '');
+    setLightingSuggestion(project.lightingSuggestion);
+    setGeneratedResults(project.generatedResults);
+    setCustomPrompt(project.customPrompt || '');
+    setIsProjectManagerOpen(false);
+    setConfirmAction(null);
   };
 
   const handleDeleteProject = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (window.confirm('确定要删除这个项目吗？此操作不可撤销。')) {
-      const updatedProjects = savedProjects.filter(p => p.id !== id);
-      setSavedProjects(updatedProjects);
-      safeLocalStorage.setItem('ai_studio_projects', JSON.stringify(updatedProjects));
-    }
+    setConfirmAction({ type: 'delete', id });
+  };
+
+  const executeDeleteProject = (id: string) => {
+    const updatedProjects = savedProjects.filter(p => p.id !== id);
+    setSavedProjects(updatedProjects);
+    safeLocalStorage.setItem('ai_studio_projects', JSON.stringify(updatedProjects));
+    setConfirmAction(null);
   };
   
   const getServiceConfig = () => ({
@@ -590,17 +611,17 @@ const AIProductStudio = ({ onRequireKey }: Props = {}) => {
 
   const handleProGenerate = async () => {
     if (!mainImage) {
-      alert('请先上传产品实拍图');
+      setToast({ message: '请先上传产品实拍图', type: 'info' });
       return;
     }
 
     // Validation for Pro Studio materials
     if (!modelAssetType && !modelImage) {
-      alert('请上传模特参考图');
+      setToast({ message: '请上传模特参考图', type: 'info' });
       return;
     }
     if (compositionImages.length === 0) {
-      alert('请上传构图参考图');
+      setToast({ message: '请上传构图参考图', type: 'info' });
       return;
     }
 
@@ -679,6 +700,21 @@ const AIProductStudio = ({ onRequireKey }: Props = {}) => {
       console.error("Vectorization error:", e);
     } finally {
       setIsVectorizing(false);
+    }
+  };
+
+  const handleCleanScene = async (sceneBase64: string) => {
+    setIsCleaningScene(true);
+    try {
+      const cleaned = await cleanSceneImage(sceneBase64, getServiceConfig());
+      if (cleaned) {
+        setSceneImage(cleaned);
+        setToast({ message: '场景图已自动优化：已移除原有床品并替换为标准白垫。', type: 'success' });
+      }
+    } catch (e) {
+      console.error("Scene cleaning error:", e);
+    } finally {
+      setIsCleaningScene(false);
     }
   };
 
@@ -983,6 +1019,53 @@ const AIProductStudio = ({ onRequireKey }: Props = {}) => {
                  )}
               </div>
            </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal */}
+      {confirmAction && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl max-w-md w-full overflow-hidden p-6">
+            <div className="flex items-center gap-4 mb-4">
+              <div className={`p-3 rounded-full ${confirmAction.type === 'delete' ? 'bg-red-500/20 text-red-400' : 'bg-indigo-500/20 text-indigo-400'}`}>
+                {confirmAction.type === 'delete' ? <Trash2 className="w-6 h-6" /> : <FolderOpen className="w-6 h-6" />}
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-slate-200">
+                  {confirmAction.type === 'delete' ? '确认删除项目？' : '确认加载项目？'}
+                </h3>
+                <p className="text-sm text-slate-400">
+                  {confirmAction.type === 'delete' 
+                    ? '此操作将永久删除该项目，不可撤销。' 
+                    : '加载项目将覆盖当前工作区的所有内容。'}
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button 
+                onClick={() => setConfirmAction(null)}
+                className="px-4 py-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg font-medium text-sm transition-colors"
+              >
+                取消
+              </button>
+              <button 
+                onClick={() => {
+                  if (confirmAction.type === 'delete' && confirmAction.id) {
+                    executeDeleteProject(confirmAction.id);
+                  } else if (confirmAction.type === 'load' && confirmAction.project) {
+                    executeLoadProject(confirmAction.project);
+                  }
+                }}
+                className={`px-6 py-2 rounded-lg font-bold text-sm transition-all shadow-lg ${
+                  confirmAction.type === 'delete' 
+                    ? 'bg-red-600 hover:bg-red-700 text-white shadow-red-500/20' 
+                    : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-500/20'
+                }`}
+              >
+                确定
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1547,6 +1630,7 @@ const AIProductStudio = ({ onRequireKey }: Props = {}) => {
                     </div>
                     <div>
                       <div className="text-xs font-bold text-slate-200">精准构图模式 (Vector Guidance)</div>
+                      <div className="text-[10px] text-slate-500 mt-0.5">仅保留主体轮廓、布局与堆叠方式</div>
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
@@ -1610,7 +1694,13 @@ const AIProductStudio = ({ onRequireKey }: Props = {}) => {
                               } else {
                                 const file = files[0];
                                 const reader = new FileReader();
-                                reader.onloadend = () => item.setState(reader.result as string);
+                                reader.onloadend = () => {
+                                  const result = reader.result as string;
+                                  item.setState(result);
+                                  if (item.id === 'scene') {
+                                    handleCleanScene(result);
+                                  }
+                                };
                                 reader.readAsDataURL(file);
                               }
                             }
@@ -1643,6 +1733,13 @@ const AIProductStudio = ({ onRequireKey }: Props = {}) => {
                             >
                               <X className="w-3 h-3" />
                             </button>
+
+                            {item.id === 'scene' && isCleaningScene && (
+                              <div className="absolute inset-0 bg-indigo-900/60 backdrop-blur-sm flex flex-col items-center justify-center text-white p-2 text-center z-20">
+                                <Loader2 className="w-6 h-6 animate-spin mb-2" />
+                                <span className="text-[10px] font-bold">正在移除原有床品...</span>
+                              </div>
+                            )}
 
                             {item.multiple && Array.isArray(item.state) && item.state.length > 1 && (
                               <div className="absolute bottom-1 left-1 px-1.5 py-0.5 bg-indigo-600/90 rounded text-[8px] font-bold text-white z-10 shadow-sm pointer-events-none">
@@ -1914,6 +2011,21 @@ const AIProductStudio = ({ onRequireKey }: Props = {}) => {
           </div>
         </div>
       </main>
+      {/* Toast Notification */}
+      {toast && (
+        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[500] animate-in slide-in-from-bottom-4 duration-300">
+          <div className={`px-6 py-3 rounded-xl shadow-2xl border flex items-center gap-3 backdrop-blur-md ${
+            toast.type === 'success' ? 'bg-emerald-500/90 border-emerald-400 text-white' :
+            toast.type === 'error' ? 'bg-red-500/90 border-red-400 text-white' :
+            'bg-indigo-500/90 border-indigo-400 text-white'
+          }`}>
+            {toast.type === 'success' ? <Check className="w-5 h-5" /> :
+             toast.type === 'error' ? <AlertCircle className="w-5 h-5" /> :
+             <Sparkles className="w-5 h-5" />}
+            <span className="font-bold text-sm">{toast.message}</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

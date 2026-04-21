@@ -65,6 +65,7 @@ const AIProductStudio = ({ onRequireKey }: Props = {}) => {
   const [isVectorMode, setIsVectorMode] = useState(false);
   const [isVectorizing, setIsVectorizing] = useState(false);
   const [isCleaningScene, setIsCleaningScene] = useState(false);
+  const [autoCleanScene, setAutoCleanScene] = useState(true);
   const [isGeneratingPro, setIsGeneratingPro] = useState(false);
 
   const modelInputRef = useRef<HTMLInputElement>(null);
@@ -1650,6 +1651,32 @@ const AIProductStudio = ({ onRequireKey }: Props = {}) => {
                   </div>
                 </div>
 
+                <div className="flex items-center justify-between mb-4 bg-slate-800/50 p-3 rounded-xl border border-slate-700/50">
+                  <div className="flex items-center gap-2">
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${autoCleanScene ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/20' : 'bg-slate-700 text-slate-400'}`}>
+                      <Shuffle className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-slate-200">场景自动优化 (Scene Clean)</div>
+                      <div className="text-[10px] text-slate-500 mt-0.5">识别场景并替换为干净白垫</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <button 
+                      onClick={() => {
+                        const nextVal = !autoCleanScene;
+                        setAutoCleanScene(nextVal);
+                        if (nextVal && sceneImage) {
+                          handleCleanScene(sceneImage);
+                        }
+                      }}
+                      className={`w-10 h-5 rounded-full transition-all relative ${autoCleanScene ? 'bg-indigo-500' : 'bg-slate-700'}`}
+                    >
+                      <div className={`absolute top-1 w-3 h-3 rounded-full bg-white transition-all shadow-sm ${autoCleanScene ? 'right-1' : 'left-1'}`} />
+                    </button>
+                  </div>
+                </div>
+
                 <div>
                   <label className="block text-sm font-bold text-slate-400 mb-2">素材选择</label>
                   <div className={`grid ${ modelAssetType ? 'grid-cols-2' : 'grid-cols-3'} gap-3 mb-4`}>
@@ -1697,7 +1724,7 @@ const AIProductStudio = ({ onRequireKey }: Props = {}) => {
                                 reader.onloadend = () => {
                                   const result = reader.result as string;
                                   item.setState(result);
-                                  if (item.id === 'scene') {
+                                  if (item.id === 'scene' && autoCleanScene) {
                                     handleCleanScene(result);
                                   }
                                 };
